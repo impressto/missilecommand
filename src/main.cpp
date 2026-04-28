@@ -94,6 +94,7 @@ static void update_start_menu(uint32_t now) {
 }
 #ifdef JOYSTICK_TEST
 static uint32_t last_joy_log_ms = 0;
+static uint32_t last_joy_hint_ms = 0;
 static int joy_min_x = 4095;
 static int joy_max_x = 0;
 static int joy_min_y = 4095;
@@ -108,38 +109,8 @@ static int read_axis_avg(int pin) {
     }
     return (int)(sum / samples);
 }
-#endif
 
-void setup() {
-    Serial.begin(115200);
-    hal_init();
-    last_ticks = hal_ticks_ms();
-    menu_enter_ms = last_ticks;
-    menu_fire_armed = 0;
-#ifdef JOYSTICK_TEST
-    Serial.println("[JOYSTICK_TEST] enabled: reporting cursor/button state");
-#endif
-}
-
-void loop() {
-    uint32_t now   = hal_ticks_ms();
-
-    if (app_mode == APP_MENU) {
-        update_start_menu(now);
-        return;
-    }
-
-    uint32_t delta = now - last_ticks;
-
-    /* Enforce ~30 fps to avoid hammering the SPI display */
-    if (delta < FRAME_MS) return;
-    last_ticks = now;
-    if (delta > 100) delta = 100;   /* safety cap */
-
-    int done = game_update(delta);
-    game_render();
-
-#ifdef JOYSTICK_TEST
+static void log_joystick_test(uint32_t now) {
     if (now - last_joy_log_ms >= 150) {
         const int cx = hal_read_cursor_x();
         const int cy = hal_read_cursor_y();
@@ -158,7 +129,55 @@ void loop() {
                       raw_x, raw_y, joy_min_x, joy_max_x, joy_min_y, joy_max_y, cx, cy, b);
         last_joy_log_ms = now;
     }
+    if (now - last_joy_hint_ms >= 2000) {
+        const int span_x = joy_max_x - joy_min_x;
+        const int span_y = joy_max_y - joy_min_y;
+        Serial.printf("CAL recommended flags: -DJOY_CAL_X_MIN=%d -DJOY_CAL_X_MAX=%d -DJOY_CAL_Y_MIN=%d -DJOY_CAL_Y_MAX=%d (spanX=%d spanY=%d)\n",
+                      joy_min_x, joy_max_x, joy_min_y, joy_max_y, span_x, span_y);
+        last_joy_hint_ms = now;
+    }
+}
 #endif
+
+void setup() {
+    Serial.begin(115200);
+    uint32_t serial_wait_start = millis();
+    while (!Serial && (millis() - serial_wait_start) < 2000) {
+        delay(10);
+    }
+    Serial.println("[BOOT] Serial ready at 115200");
+    hal_init();
+    last_ticks = hal_ticks_ms();
+    menu_enter_ms = last_ticks;
+    menu_fire_armed = 0;
+#ifdef JOYSTICK_TEST
+    Serial.println("[JOYSTICK_TEST] enabled: calibration logging active");
+    Serial.println("[JOYSTICK_TEST] Move stick to far LEFT/RIGHT/UP/DOWN repeatedly for ~10s.");
+    Serial.println("[JOYSTICK_TEST] Then copy the printed -DJOY_CAL_* flags into platformio.ini build_flags.");
+#endif
+}
+
+void loop() {
+    uint32_t now   = hal_ticks_ms();
+
+#ifdef JOYSTICK_TEST
+    log_joystick_test(now);
+#endif
+
+    if (app_mode == APP_MENU) {
+        update_start_menu(now);
+        return;
+    }
+
+    uint32_t delta = now - last_ticks;
+
+    /* Enforce ~30 fps to avoid hammering the SPI display */
+    if (delta < FRAME_MS) return;
+    last_ticks = now;
+    if (delta > 100) delta = 100;   /* safety cap */
+
+    int done = game_update(delta);
+    game_render();
 
     if (done) {
         /* Game over — wait for a button press then restart */

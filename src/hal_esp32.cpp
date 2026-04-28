@@ -82,12 +82,27 @@
 #define JOY_STEP_DIVISOR 200
 #define JOY_STEP_MAX 3
 #define BUTTON_CURSOR_STEP 4
-#define JOY_ABSOLUTE_MODE 1
+#ifndef JOY_ABSOLUTE_MODE
+#define JOY_ABSOLUTE_MODE 0
+#endif
 #define JOY_INVERT_X 0
 #define JOY_INVERT_Y 0
 
 #ifndef JOY_ABS_DEAD_RAW
 #define JOY_ABS_DEAD_RAW 260
+#endif
+
+#ifndef JOY_CAL_X_MIN
+#define JOY_CAL_X_MIN 0
+#endif
+#ifndef JOY_CAL_X_MAX
+#define JOY_CAL_X_MAX ADC_MAX
+#endif
+#ifndef JOY_CAL_Y_MIN
+#define JOY_CAL_Y_MIN 0
+#endif
+#ifndef JOY_CAL_Y_MAX
+#define JOY_CAL_Y_MAX ADC_MAX
 #endif
 
 #ifndef JOY_ABS_SMOOTH_NUM
@@ -143,30 +158,44 @@ static int read_axis_raw_averaged(int pin) {
     return (int)(sum / samples);
 }
 
-static int map_axis_to_coord(int raw, int center, int upper_bound, int invert) {
+static int map_axis_to_coord(int raw, int center,
+                             int min_raw, int max_raw,
+                             int upper_bound, int invert) {
     if (raw < 0) raw = 0;
     if (raw > ADC_MAX) raw = ADC_MAX;
+    if (upper_bound <= 1) {
+        return 0;
+    }
 
-    int v = invert ? (ADC_MAX - raw) : raw;
-    int c = invert ? (ADC_MAX - center) : center;
-    int delta = v - c;
+    if (min_raw > max_raw) {
+        int t = min_raw;
+        min_raw = max_raw;
+        max_raw = t;
+    }
+    if (min_raw < 0) min_raw = 0;
+    if (max_raw > ADC_MAX) max_raw = ADC_MAX;
+
+    if ((max_raw - min_raw) < 64) {
+        min_raw = 0;
+        max_raw = ADC_MAX;
+    }
+
+    if (raw < min_raw) raw = min_raw;
+    if (raw > max_raw) raw = max_raw;
+
+    const int range = max_raw - min_raw;
+    int coord = ((raw - min_raw) * (upper_bound - 1) + (range / 2)) / range;
+
+    const int delta = raw - center;
     int abs_delta = (delta < 0) ? -delta : delta;
 
     if (abs_delta <= JOY_ABS_DEAD_RAW) {
         return (upper_bound - 1) / 2;
     }
 
-    int half = (upper_bound - 1) / 2;
-    int sign = (delta >= 0) ? 1 : -1;
-    int span = (delta >= 0) ? (ADC_MAX - c) : c;
-    if (span <= JOY_ABS_DEAD_RAW) {
-        return (upper_bound - 1) / 2;
+    if (invert) {
+        coord = (upper_bound - 1) - coord;
     }
-
-    int mag = abs_delta - JOY_ABS_DEAD_RAW;
-    int range = span - JOY_ABS_DEAD_RAW;
-    int offset = (mag * half + (range / 2)) / range;
-    int coord = half + sign * offset;
     if (coord < 0) coord = 0;
     if (coord >= upper_bound) coord = upper_bound - 1;
     return coord;
@@ -244,8 +273,12 @@ static void sample_cursor_once(void) {
         joy_filtered_x = (JOY_ABS_SMOOTH_NUM * joy_filtered_x + ((JOY_ABS_SMOOTH_DEN - JOY_ABS_SMOOTH_NUM) * raw_x)) / JOY_ABS_SMOOTH_DEN;
         joy_filtered_y = (JOY_ABS_SMOOTH_NUM * joy_filtered_y + ((JOY_ABS_SMOOTH_DEN - JOY_ABS_SMOOTH_NUM) * raw_y)) / JOY_ABS_SMOOTH_DEN;
 
-        cursor_x = map_axis_to_coord(joy_filtered_x, joy_center_x, SCREEN_W, JOY_INVERT_X);
-        cursor_y = map_axis_to_coord(joy_filtered_y, joy_center_y, SCREEN_H, JOY_INVERT_Y);
+        cursor_x = map_axis_to_coord(joy_filtered_x, joy_center_x,
+                         JOY_CAL_X_MIN, JOY_CAL_X_MAX,
+                         SCREEN_W, JOY_INVERT_X);
+        cursor_y = map_axis_to_coord(joy_filtered_y, joy_center_y,
+                         JOY_CAL_Y_MIN, JOY_CAL_Y_MAX,
+                         SCREEN_H, JOY_INVERT_Y);
     } else {
         update_cursor_axis(JOY_X_PIN, &cursor_x, SCREEN_W);
         update_cursor_axis(JOY_Y_PIN, &cursor_y, SCREEN_H);
