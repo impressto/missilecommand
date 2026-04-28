@@ -1,0 +1,2 @@
+wasm_host/dist/*
+wasm_host/build/missile_command.data
