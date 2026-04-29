@@ -496,6 +496,7 @@ void game_init(void) {
 
     gs.lives             = 3;
     gs.last_rebuild_threshold = 0;
+    gs.prev_buttons      = 0xFF;  /* Initialize to all pressed so first frame doesn't fire */
 
     /* Place cities evenly across the bottom, avoiding battery positions */
     int city_xs[NUM_CITIES] = {30, 75, 120, 200, 245, 290};
@@ -877,7 +878,8 @@ void game_render(void) {
         if (e->y == GROUND_Y) {
             hal_draw_circle_top_half_gradient(e->x, e->y, e->radius, e->color);
         } else {
-            hal_draw_circle(e->x, e->y, e->radius, e->color);
+            /* Air explosions (intercepts): draw with gradient (white center to edge color) */
+            hal_draw_circle_gradient(e->x, e->y, e->radius, e->color);
         }
     }
 

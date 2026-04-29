@@ -6,6 +6,7 @@
  */
 
 #include <Arduino.h>
+#include <string.h>
 #include "hal.h"              /* local to esp32/src */
 #include "missile_command.h"
 
@@ -29,22 +30,32 @@ enum AppMode {
 static AppMode app_mode = APP_MENU;
 static int menu_demo_selected = 0;
 
+static int text_pixel_width(const char *str) {
+    const int len = (int)strlen(str);
+    return (len > 0) ? (6 * len - 1) : 0;
+}
+
+static void draw_text_centered(int y, const char *str, uint16_t color, uint16_t bg) {
+    const int x = (SCREEN_W - text_pixel_width(str)) / 2;
+    hal_draw_text(x, y, str, color, bg);
+}
+
 static void draw_start_menu() {
     hal_clear(COL_BLACK);
     hal_draw_rect(14, 18, SCREEN_W - 28, 196, COL_BLACK);
-    hal_draw_text(92, 34, "MISSILE COMMAND", COL_CYAN, COL_BLACK);
-    hal_draw_text(90, 56, "ESP32 START MENU", COL_WHITE, COL_BLACK);
+    draw_text_centered(34, "MISSILE COMMAND", COL_CYAN, COL_BLACK);
+    draw_text_centered(56, "ESP32 START MENU", COL_WHITE, COL_BLACK);
 
     const uint16_t play_col = menu_demo_selected ? COL_WHITE : COL_GREEN;
     const uint16_t demo_col = menu_demo_selected ? COL_YELLOW : COL_WHITE;
-    hal_draw_text(54, 108, menu_demo_selected ? "  PLAY NOW" : "> PLAY NOW", play_col, COL_BLACK);
-    hal_draw_text(54, 124, menu_demo_selected ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
+    draw_text_centered(108, menu_demo_selected ? "  PLAY NOW" : "> PLAY NOW", play_col, COL_BLACK);
+    draw_text_centered(124, menu_demo_selected ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
 
-    hal_draw_text(10, 174, "Move joystick left/right or up/down", COL_GRAY, COL_BLACK);
+    draw_text_centered(174, "Move joystick left/right or up/down", COL_GRAY, COL_BLACK);
     if (menu_fire_armed) {
-        hal_draw_text(36, 188, "Press fire button to start", COL_GRAY, COL_BLACK);
+        draw_text_centered(188, "Press fire button to start", COL_GRAY, COL_BLACK);
     } else {
-        hal_draw_text(44, 188, "Release fire to arm menu", COL_GRAY, COL_BLACK);
+        draw_text_centered(188, "Release fire to arm menu", COL_GRAY, COL_BLACK);
     }
     hal_present();
 }

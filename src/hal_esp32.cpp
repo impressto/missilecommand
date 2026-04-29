@@ -605,6 +605,25 @@ void hal_draw_circle_top_half_gradient(int cx, int cy, int r, uint16_t color_edg
     }
 }
 
+void hal_draw_circle_gradient(int cx, int cy, int r, uint16_t color_edge) {
+    /* Draw concentric full circles from white center to color_edge */
+    /* Draw from largest to smallest so white center stays on top */
+    uint16_t color_white = RGB565(255, 255, 255);
+    int steps = r;
+    if (steps < 1) steps = 1;
+    
+    for (int i = steps; i >= 0; i--) {
+        int ratio = i * 255 / steps;  /* 255 at edge (i=steps), 0 at center (i=0) */
+        uint16_t color = interpolate_rgb565(color_white, color_edge, ratio);
+        int r_i = (int)((long)i * r / steps);
+        
+        for (int dy = -r_i; dy <= r_i; dy++) {
+            int half_w = isqrt_esp32(r_i * r_i - dy * dy);
+            hal_draw_rect(cx - half_w, cy + dy, half_w * 2 + 1, 1, color);
+        }
+    }
+}
+
 void hal_draw_char(int x, int y, char c, uint16_t color, uint16_t bg) {
     if (use_backbuffer) {
         backbuffer->setCursor(x, y);

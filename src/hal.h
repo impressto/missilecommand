@@ -94,6 +94,13 @@ void hal_draw_circle_top_half(int cx, int cy, int r, uint16_t color);
 void hal_draw_circle_top_half_gradient(int cx, int cy, int r, uint16_t color_edge);
 
 /**
+ * hal_draw_circle_gradient(cx, cy, r, color_edge) — 
+ * filled circle with gradient from white center to edge color.
+ * Draws concentric full circles with interpolated colors.
+ */
+void hal_draw_circle_gradient(int cx, int cy, int r, uint16_t color_edge);
+
+/**
  * hal_draw_char(x, y, c, color, bg) — draw a single ASCII character (5×7 font).
  * bg = COL_BLACK means transparent (no background drawn) is up to the impl.
  */
