@@ -85,8 +85,8 @@
 #define CFG_TRAIL_TAIL_G TRAIL_TAIL_G
 #define CFG_TRAIL_TAIL_B TRAIL_TAIL_B
 #else
-#define CFG_TRAIL_TAIL_R 255
-#define CFG_TRAIL_TAIL_G 32
+#define CFG_TRAIL_TAIL_R 96
+#define CFG_TRAIL_TAIL_G 16
 #define CFG_TRAIL_TAIL_B 0
 #endif
 #endif
@@ -105,7 +105,7 @@
 #ifdef TRAIL_FADE_DIST
 #define CFG_TRAIL_FADE_DIST TRAIL_FADE_DIST
 #else
-#define CFG_TRAIL_FADE_DIST 60
+#define CFG_TRAIL_FADE_DIST 84
 #endif
 #endif
 #ifndef CFG_ENEMY_RENDER_MIN_Y

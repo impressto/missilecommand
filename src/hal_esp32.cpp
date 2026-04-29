@@ -15,6 +15,9 @@
 #include <limits.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
 
 #include "game_config.h"
 #include "background-1.h"
@@ -115,8 +118,25 @@
 
 /* ── Display driver instance ─────────────────────────────────────────────── */
 static Adafruit_ST7789 tft(TFT_CS, TFT_DC, TFT_RST);
-static GFXcanvas16 *backbuffer = nullptr;
+
+/* ── Double-buffer via PSRAM ─────────────────────────────────────────────── */
+/* Core 1 draws into backbuffer (GFXcanvas16, internal SRAM — same as       */
+/* before). On hal_present() it memcpy's to disp_psram (PSRAM, ~153 KB) and  */
+/* signals Core 0 to blit over SPI.  The two tasks fully overlap.           */
+static GFXcanvas16    *backbuffer       = nullptr;   /* draw target, Core 1  */
+static uint16_t       *disp_psram       = nullptr;   /* blit source, Core 0  */
+static SemaphoreHandle_t sem_frame_ready = nullptr;  /* Core 1 → Core 0      */
+static SemaphoreHandle_t sem_blit_done   = nullptr;  /* Core 0 → Core 1      */
 static bool use_backbuffer = false;
+static bool use_dual_core  = false;
+
+static void display_task(void *) {
+    for (;;) {
+        xSemaphoreTake(sem_frame_ready, portMAX_DELAY);
+        tft.drawRGBBitmap(0, 0, disp_psram, SCREEN_W, SCREEN_H);
+        xSemaphoreGive(sem_blit_done);
+    }
+}
 
 /* ── Image assets exported as RGB565 arrays in PROGMEM ───────────────────── */
 static constexpr uint16_t TRANSPARENT_KEY = 0x0000;
@@ -330,6 +350,24 @@ void hal_init(void) {
     backbuffer = new GFXcanvas16(SCREEN_W, SCREEN_H);
     use_backbuffer = (backbuffer != nullptr) && (backbuffer->getBuffer() != nullptr);
 
+    if (use_backbuffer) {
+        /* Allocate the display-copy buffer from PSRAM (8 MB on S3 DevKitC-1). */
+        /* This never touches internal SRAM so it cannot cause an OOM reboot.  */
+        disp_psram = (uint16_t *)ps_malloc(SCREEN_W * SCREEN_H * sizeof(uint16_t));
+        if (disp_psram != nullptr) {
+            memcpy(disp_psram, background_1, BG_W * BG_H * sizeof(uint16_t));
+            sem_frame_ready = xSemaphoreCreateBinary();
+            sem_blit_done   = xSemaphoreCreateBinary();
+            xSemaphoreGive(sem_blit_done);  /* let first hal_present() proceed */
+            /* Stack 8192 B, priority 1: below ESP-IDF system tasks on Core 0. */
+            xTaskCreatePinnedToCore(display_task, "disp", 8192, nullptr, 1, nullptr, 0);
+            use_dual_core = true;
+            Serial.println("[HAL] dual-core+PSRAM OK");
+        } else {
+            Serial.println("[HAL] ps_malloc failed — single-buf fallback");
+        }
+    }
+
     if (TFT_BL >= 0) {
         pinMode(TFT_BL, OUTPUT);
         digitalWrite(TFT_BL, HIGH);
@@ -429,7 +467,17 @@ void hal_draw_text_scaled(int x, int y, const char *str, uint16_t color, int sca
 }
 
 void hal_present(void) {
-    if (use_backbuffer) {
+    if (!use_backbuffer) return;
+    if (use_dual_core) {
+        /* Wait for Core 0 to finish the previous SPI blit. */
+        xSemaphoreTake(sem_blit_done, portMAX_DELAY);
+        /* Snapshot the freshly-drawn frame into the PSRAM display buffer.    */
+        /* This memcpy (~153 KB) runs on Core 1 while Core 0 is idle between  */
+        /* blits, so it costs nothing in wall-clock time.                     */
+        memcpy(disp_psram, backbuffer->getBuffer(), SCREEN_W * SCREEN_H * sizeof(uint16_t));
+        /* Signal Core 0 to start the SPI blit. */
+        xSemaphoreGive(sem_frame_ready);
+    } else {
         tft.drawRGBBitmap(0, 0, backbuffer->getBuffer(), SCREEN_W, SCREEN_H);
     }
 }

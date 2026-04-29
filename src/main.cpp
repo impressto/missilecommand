@@ -171,8 +171,9 @@ void loop() {
 
     uint32_t delta = now - last_ticks;
 
-    /* Enforce ~30 fps to avoid hammering the SPI display */
-    if (delta < FRAME_MS) return;
+    /* In dual-core mode hal_present() is naturally paced by the SPI blit;   */
+    /* keep only a loose cap so delta never hits zero on very fast iterations. */
+    if (delta < 16) return;  /* ~60 fps ceiling; SPI pipeline sets real rate  */
     last_ticks = now;
     if (delta > 100) delta = 100;   /* safety cap */
 
