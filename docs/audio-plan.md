@@ -1,5 +1,22 @@
 # Audio Implementation Plan — MAX98357A + MP3-to-header files
 
+## Interim Option: Passive Piezo Buzzer
+- Before the MAX98357A arrives, the ESP32 build can use a **passive piezo** for simple tone effects.
+- Current stopgap implementation path:
+  - `PIEZO_PIN` build flag in `platformio.ini` (default `GPIO 17`)
+  - `hal_play_sound()` maps game sound IDs to short tone sequences
+  - `scripts/midi_to_piezo.py` can convert a `.mid` file into a generated piezo header
+  - LEDC PWM generates the square wave; no MP3 decode or I2S required
+- Limits:
+  - good for beeps, alarms, descending explosions, and simple musical cues
+  - not suitable for real explosion samples or speech/music beds
+
+This piezo path is intentionally separate from the future MAX98357A / MP3 path, so it can be removed cleanly later.
+
+Current example:
+- `wasm/sounds/explode.mid` is converted into `src/explode_midi_piezo.h`
+- The ESP32 `SND_IMPACT` effect now plays that generated sequence
+
 ## Hardware
 - **Amplifier board**: MAX98357A (I2S, mono, 3 W class D)
 - **Connection**: I2S peripheral on ESP32-S3 (3 wires: BCLK, LRC/WS, DIN)

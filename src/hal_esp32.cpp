@@ -23,6 +23,11 @@
 #include "background-1.h"
 #include "civilian-target.h"
 #include "bunker-1.h"
+#include "explode_midi_piezo.h"
+#include "missile2_midi_piezo.h"
+#include "swoopup_midi_piezo.h"
+#include "alert_midi_piezo.h"
+#include "rollup_midi_piezo.h"
 
 #ifndef TFT_CS
 #define TFT_CS   10
@@ -63,6 +68,35 @@
 #endif
 #ifndef FIRE_PIN_2
 #define FIRE_PIN_2  -1
+#endif
+#ifndef PIEZO_PIN
+#define PIEZO_PIN   -1
+#endif
+#ifndef PIEZO_LEDC_CHANNEL
+#define PIEZO_LEDC_CHANNEL 7
+#endif
+
+/* Per-sound enable flags — set to 0 in platformio.ini build_flags to silence. */
+#ifndef CFG_SND_LAUNCH_EN
+#define CFG_SND_LAUNCH_EN       0
+#endif
+#ifndef CFG_SND_PLAYER_BURST_EN
+#define CFG_SND_PLAYER_BURST_EN 1
+#endif
+#ifndef CFG_SND_INTERCEPT_EN
+#define CFG_SND_INTERCEPT_EN    1
+#endif
+#ifndef CFG_SND_IMPACT_EN
+#define CFG_SND_IMPACT_EN       1
+#endif
+#ifndef CFG_SND_ALERT_EN
+#define CFG_SND_ALERT_EN        0
+#endif
+#ifndef CFG_SND_WAVE_COMPLETE_EN
+#define CFG_SND_WAVE_COMPLETE_EN 1
+#endif
+#ifndef CFG_SND_GAME_OVER_EN
+#define CFG_SND_GAME_OVER_EN    1
 #endif
 
 #ifndef TFT_WIDTH
@@ -116,6 +150,14 @@
 #define JOY_ABS_SMOOTH_DEN 8
 #endif
 
+/* ── Utility functions ───────────────────────────────────────────────────── */
+static int isqrt_esp32(int n) {
+    if (n <= 0) return 0;
+    int x = n, y = 1;
+    while (x > y) { x = (x + y) / 2; y = n / x; }
+    return x;
+}
+
 /* ── Display driver instance ─────────────────────────────────────────────── */
 static Adafruit_ST7789 tft(TFT_CS, TFT_DC, TFT_RST);
 
@@ -129,6 +171,91 @@ static SemaphoreHandle_t sem_frame_ready = nullptr;  /* Core 1 → Core 0      *
 static SemaphoreHandle_t sem_blit_done   = nullptr;  /* Core 0 → Core 1      */
 static bool use_backbuffer = false;
 static bool use_dual_core  = false;
+static QueueHandle_t sound_queue = nullptr;
+static bool use_piezo = false;
+
+static void piezo_silence(void) {
+    if (!use_piezo) {
+        return;
+    }
+    ledcWriteTone(PIEZO_LEDC_CHANNEL, 0);
+    ledcWrite(PIEZO_LEDC_CHANNEL, 0);
+}
+
+static void piezo_step(uint16_t freq_hz, uint16_t duration_ms) {
+    if (!use_piezo || duration_ms == 0) {
+        return;
+    }
+    if (freq_hz == 0) {
+        piezo_silence();
+    } else {
+        ledcWriteTone(PIEZO_LEDC_CHANNEL, freq_hz);
+        ledcWrite(PIEZO_LEDC_CHANNEL, 127);
+    }
+    vTaskDelay(pdMS_TO_TICKS(duration_ms));
+}
+
+static void piezo_play_sequence(const uint16_t steps[][2], int step_count) {
+    for (int i = 0; i < step_count; i++) {
+        piezo_step(steps[i][0], steps[i][1]);
+    }
+}
+
+static void piezo_play_pattern(int sound_id) {
+    switch (sound_id) {
+#if CFG_SND_LAUNCH_EN
+        case SND_LAUNCH:
+            piezo_play_sequence(missile2_midi_piezo, missile2_midi_piezo_count);
+            break;
+#endif
+#if CFG_SND_PLAYER_BURST_EN
+        case SND_PLAYER_BURST:
+            piezo_play_sequence(swoopup_midi_piezo, swoopup_midi_piezo_count);
+            break;
+#endif
+#if CFG_SND_INTERCEPT_EN
+        case SND_INTERCEPT:
+            piezo_step(1760, 25);
+            piezo_step(1480, 25);
+            piezo_step(1244, 40);
+            break;
+#endif
+#if CFG_SND_IMPACT_EN
+        case SND_IMPACT:
+            piezo_play_sequence(explode_midi_piezo, explode_midi_piezo_count);
+            break;
+#endif
+#if CFG_SND_ALERT_EN
+        case SND_ALERT:
+            piezo_play_sequence(alert_midi_piezo, alert_midi_piezo_count);
+            break;
+#endif
+#if CFG_SND_WAVE_COMPLETE_EN
+        case SND_WAVE_COMPLETE:
+            piezo_play_sequence(rollup_midi_piezo, rollup_midi_piezo_count);
+            break;
+#endif
+#if CFG_SND_GAME_OVER_EN
+        case SND_GAME_OVER:
+            piezo_step(523, 100);
+            piezo_step(392, 130);
+            piezo_step(262, 180);
+            break;
+#endif
+        default:
+            break;
+    }
+    piezo_silence();
+}
+
+static void piezo_task(void *) {
+    int sound_id = 0;
+    for (;;) {
+        if (xQueueReceive(sound_queue, &sound_id, portMAX_DELAY) == pdTRUE) {
+            piezo_play_pattern(sound_id);
+        }
+    }
+}
 
 static void display_task(void *) {
     for (;;) {
@@ -378,6 +505,20 @@ void hal_init(void) {
     configure_input_pin(LEFT_PIN);
     configure_input_pin(RIGHT_PIN);
 
+    if (PIEZO_PIN >= 0) {
+        ledcSetup(PIEZO_LEDC_CHANNEL, 2000, 8);
+        ledcAttachPin(PIEZO_PIN, PIEZO_LEDC_CHANNEL);
+        ledcWrite(PIEZO_LEDC_CHANNEL, 0);
+        sound_queue = xQueueCreate(8, sizeof(int));
+        if (sound_queue != nullptr) {
+            xTaskCreatePinnedToCore(piezo_task, "piezo", 3072, nullptr, 1, nullptr, 1);
+            use_piezo = true;
+            Serial.printf("[HAL] piezo on GPIO %d\n", PIEZO_PIN);
+        } else {
+            Serial.println("[HAL] piezo queue alloc failed");
+        }
+    }
+
     analogReadResolution(12);
     configure_analog_input_pin(JOY_X_PIN);
     configure_analog_input_pin(JOY_Y_PIN);
@@ -418,6 +559,50 @@ void hal_draw_line(int x0, int y0, int x1, int y1, uint16_t color) {
 void hal_draw_circle(int cx, int cy, int r, uint16_t color) {
     if (use_backbuffer) backbuffer->fillCircle(cx, cy, r, color);
     else                tft.fillCircle(cx, cy, r, color);
+}
+
+void hal_draw_circle_top_half(int cx, int cy, int r, uint16_t color) {
+    /* Draw filled semicircle: top half only (dy from -r to 0 from center) */
+    for (int dy = -r; dy <= 0; dy++) {
+        int half_w = isqrt_esp32(r * r - dy * dy);
+        hal_draw_rect(cx - half_w, cy + dy, half_w * 2 + 1, 1, color);
+    }
+}
+
+static uint16_t interpolate_rgb565(uint16_t color_center, uint16_t color_edge, int ratio) {
+    /* ratio: 0 = all center, 255 = all edge */
+    uint8_t r_c = (color_center >> 8) & 0xF8;
+    uint8_t g_c = (color_center >> 3) & 0xFC;
+    uint8_t b_c = (color_center << 3) & 0xF8;
+    
+    uint8_t r_e = (color_edge >> 8) & 0xF8;
+    uint8_t g_e = (color_edge >> 3) & 0xFC;
+    uint8_t b_e = (color_edge << 3) & 0xF8;
+    
+    uint8_t r = (r_c * (255 - ratio) + r_e * ratio) / 255;
+    uint8_t g = (g_c * (255 - ratio) + g_e * ratio) / 255;
+    uint8_t b = (b_c * (255 - ratio) + b_e * ratio) / 255;
+    
+    return RGB565(r, g, b);
+}
+
+void hal_draw_circle_top_half_gradient(int cx, int cy, int r, uint16_t color_edge) {
+    /* Draw concentric half-circles from white center to color_edge */
+    /* Draw from largest to smallest so white center stays on top */
+    uint16_t color_white = RGB565(255, 255, 255);
+    int steps = r;
+    if (steps < 1) steps = 1;
+    
+    for (int i = steps; i >= 0; i--) {
+        int ratio = i * 255 / steps;  /* 255 at edge (i=steps), 0 at center (i=0) */
+        uint16_t color = interpolate_rgb565(color_white, color_edge, ratio);
+        int r_i = (int)((long)i * r / steps);
+        
+        for (int dy = -r_i; dy <= 0; dy++) {
+            int half_w = isqrt_esp32(r_i * r_i - dy * dy);
+            hal_draw_rect(cx - half_w, cy + dy, half_w * 2 + 1, 1, color);
+        }
+    }
 }
 
 void hal_draw_char(int x, int y, char c, uint16_t color, uint16_t bg) {
@@ -526,8 +711,11 @@ void hal_draw_sprite(int cx, int y_bottom, int sprite_id) {
 }
 
 void hal_play_sound(int sound_id) {
-    /* No speaker in base hardware; silence is fine. */
-    (void)sound_id;
+    if (!use_piezo || sound_queue == nullptr) {
+        (void)sound_id;
+        return;
+    }
+    (void)xQueueSend(sound_queue, &sound_id, 0);
 }
 
 } /* extern "C" */

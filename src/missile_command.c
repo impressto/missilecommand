@@ -873,7 +873,12 @@ void game_render(void) {
     for (int i = 0; i < MAX_EXPLOSIONS; i++) {
         Explosion *e = &gs.explosions[i];
         if (!e->active) continue;
-        hal_draw_circle(e->x, e->y, e->radius, e->color);
+        /* Ground explosions: draw with gradient (white center fading to orange edge) */
+        if (e->y == GROUND_Y) {
+            hal_draw_circle_top_half_gradient(e->x, e->y, e->radius, e->color);
+        } else {
+            hal_draw_circle(e->x, e->y, e->radius, e->color);
+        }
     }
 
     /* ── Crosshair cursor ────────────────────────────────────────────────── */

@@ -315,6 +315,50 @@ void hal_draw_circle(int cx, int cy, int r, uint16_t color) {
     }
 }
 
+void hal_draw_circle_top_half(int cx, int cy, int r, uint16_t color) {
+    /* Filled semicircle: top half only (dy from -r to 0 from center) */
+    for (int dy = -r; dy <= 0; dy++) {
+        int half_w = isqrt_approx(r * r - dy * dy);
+        hal_draw_rect(cx - half_w, cy + dy, half_w * 2 + 1, 1, color);
+    }
+}
+
+static uint16_t interpolate_rgb565_wasm(uint16_t color_center, uint16_t color_edge, int ratio) {
+    /* ratio: 0 = all center, 255 = all edge */
+    uint8_t r_c = (color_center >> 8) & 0xF8;
+    uint8_t g_c = (color_center >> 3) & 0xFC;
+    uint8_t b_c = (color_center << 3) & 0xF8;
+    
+    uint8_t r_e = (color_edge >> 8) & 0xF8;
+    uint8_t g_e = (color_edge >> 3) & 0xFC;
+    uint8_t b_e = (color_edge << 3) & 0xF8;
+    
+    uint8_t r = (r_c * (255 - ratio) + r_e * ratio) / 255;
+    uint8_t g = (g_c * (255 - ratio) + g_e * ratio) / 255;
+    uint8_t b = (b_c * (255 - ratio) + b_e * ratio) / 255;
+    
+    return RGB565(r, g, b);
+}
+
+void hal_draw_circle_top_half_gradient(int cx, int cy, int r, uint16_t color_edge) {
+    /* Draw concentric half-circles from white center to color_edge */
+    /* Draw from largest to smallest so white center stays on top */
+    uint16_t color_white = RGB565(255, 255, 255);
+    int steps = r;
+    if (steps < 1) steps = 1;
+    
+    for (int i = steps; i >= 0; i--) {
+        int ratio = i * 255 / steps;  /* 255 at edge (i=steps), 0 at center (i=0) */
+        uint16_t color = interpolate_rgb565_wasm(color_white, color_edge, ratio);
+        int r_i = (int)((long)i * r / steps);
+        
+        for (int dy = -r_i; dy <= 0; dy++) {
+            int half_w = isqrt_approx(r_i * r_i - dy * dy);
+            hal_draw_rect(cx - half_w, cy + dy, half_w * 2 + 1, 1, color);
+        }
+    }
+}
+
 /* Local isqrt used only inside this translation unit */
 static int isqrt_approx(int n) {
     if (n <= 0) return 0;

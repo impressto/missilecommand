@@ -82,5 +82,27 @@ Config for the ESP32 build is in `src/game_config.c` (CFG_* macros).
 
 ---
 
+## Interim Audio: Passive Piezo
+
+Until the MAX98357A modules arrive, the ESP32 build can drive a **passive piezo buzzer** with short tone patterns via LEDC PWM.
+
+- Default test pin: `GPIO 17` via `-DPIEZO_PIN=17` in `platformio.ini`
+- This is a stopgap for simple arcade / MIDI-like effects only, not sampled audio
+- `hal_play_sound()` now queues short tone patterns for launch, intercept, impact, alert, wave-complete, and game-over events
+- `SND_IMPACT` is now generated from `wasm/sounds/explode.mid` into `src/explode_midi_piezo.h`
+- The piezo task runs independently of the display pipeline and uses hardware PWM, so the CPU cost is low
+
+Notes:
+- Use a **passive** piezo buzzer, not an active buzzer module with its own oscillator
+- If you later wire the MAX98357A, just remove or comment out `-DPIEZO_PIN=17`
+- Planned MAX98357A pins remain `14/15/16`, so the default piezo pin does not block that path
+
+Regenerate the impact pattern after editing the MIDI file:
+```bash
+/usr/bin/python3 scripts/midi_to_piezo.py wasm/sounds/explode.mid src/explode_midi_piezo.h
+```
+
+---
+
 ## Planned: Audio (MAX98357A)
 See `docs/audio-plan.md`.
