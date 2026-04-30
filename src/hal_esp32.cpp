@@ -586,6 +586,19 @@ static uint16_t interpolate_rgb565(uint16_t color_center, uint16_t color_edge, i
     return RGB565(r, g, b);
 }
 
+static uint16_t blend_rgb565_toward_black(uint16_t src, uint8_t amount) {
+    uint8_t r5 = (uint8_t)((src >> 11) & 0x1Fu);
+    uint8_t g6 = (uint8_t)((src >> 5) & 0x3Fu);
+    uint8_t b5 = (uint8_t)(src & 0x1Fu);
+
+    uint16_t inv = (uint16_t)(255u - amount);
+    uint8_t r5o = (uint8_t)((r5 * inv + 127u) / 255u);
+    uint8_t g6o = (uint8_t)((g6 * inv + 127u) / 255u);
+    uint8_t b5o = (uint8_t)((b5 * inv + 127u) / 255u);
+
+    return (uint16_t)((r5o << 11) | (g6o << 5) | b5o);
+}
+
 void hal_draw_circle_top_half_gradient(int cx, int cy, int r, uint16_t color_edge) {
     /* Draw concentric half-circles from white center to color_edge */
     /* Draw from largest to smallest so white center stays on top */
@@ -726,6 +739,24 @@ void hal_draw_sprite(int cx, int y_bottom, int sprite_id) {
         draw_sprite_with_key(cx, y_bottom,
                              bunker_1, BUNKER_SPRITE_W, BUNKER_SPRITE_H,
                              BUNKER_SPRITE_Y_OFFSET);
+    }
+}
+
+void hal_fade_to_black(uint8_t amount) {
+    if (amount == 0) return;
+
+    if (use_backbuffer) {
+        uint16_t *buf = backbuffer->getBuffer();
+        if (!buf) return;
+        const int count = SCREEN_W * SCREEN_H;
+        for (int i = 0; i < count; i++) {
+            buf[i] = blend_rgb565_toward_black(buf[i], amount);
+        }
+    } else {
+        /* Fallback path if no software framebuffer is active. */
+        if (amount >= 200) {
+            tft.fillRect(0, 0, SCREEN_W, SCREEN_H, COL_BLACK);
+        }
     }
 }
 

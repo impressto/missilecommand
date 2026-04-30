@@ -137,6 +137,13 @@ void hal_draw_sprite(int cx, int y_bottom, int sprite_id);
 void hal_draw_ground(void);
 
 /**
+ * hal_fade_to_black(amount) — post-process current frame toward black.
+ * amount is 0..255 (0 = no effect, 255 = full black).
+ * Intended for smooth full-screen fade-out effects.
+ */
+void hal_fade_to_black(uint8_t amount);
+
+/**
  * hal_present() — flush the framebuffer to the display.
  * On displays with direct pixel access this may be a no-op.
  * On WebAssembly this triggers a canvas repaint.

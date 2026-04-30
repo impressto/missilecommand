@@ -69,6 +69,8 @@ static struct {
     int      wave;
     int      lives;
     int      game_over;
+    int      final_city_flash_active;
+    uint32_t final_city_flash_ms;
 
     /* Wave management */
     int      enemies_to_launch;   /* total enemies for this wave */
@@ -109,6 +111,7 @@ static int g_demo_mode_selected = 0;
 #define BATTERY_WIDTH   16
 #define BATTERY_HEIGHT  12
 #define BATTERY_AMMO_MAX 10
+#define FINAL_CITY_FLASH_DURATION_MS 850u
 
 /* Text and visual tuning values live in game_config.c/game_config.h. */
 
@@ -127,6 +130,18 @@ static uint32_t rng_state = 12345u;
 static uint32_t rng_next(void) {
     rng_state = rng_state * 1664525u + 1013904223u;
     return rng_state;
+}
+static void rng_seed_runtime(void) {
+    uint32_t seed = hal_ticks_ms();
+    seed ^= ((uint32_t)hal_read_cursor_x() << 16);
+    seed ^= ((uint32_t)hal_read_cursor_y() << 1);
+    seed ^= ((uint32_t)hal_read_input() << 24);
+    seed ^= 0xA5A55A5Au;
+    if (seed == 0u) seed = 12345u;
+    rng_state = seed;
+    /* Warm up the LCG to decorrelate initial values from the raw seed bits. */
+    (void)rng_next();
+    (void)rng_next();
 }
 static int rng_range(int lo, int hi) {
     /* hi is exclusive */
@@ -490,6 +505,7 @@ void game_set_demo_mode(int enabled) {
 
 void game_init(void) {
     memset(&gs, 0, sizeof(gs));
+    rng_seed_runtime();
 
     gs.demo_mode = g_demo_mode_selected;
     gs.demo_fire_cooldown_ms = 0;
@@ -520,6 +536,17 @@ void game_init(void) {
 
 int game_update(uint32_t delta_ms) {
     if (gs.game_over) return 1;
+
+    if (gs.final_city_flash_active) {
+        if (delta_ms >= gs.final_city_flash_ms) {
+            gs.final_city_flash_ms = 0;
+            gs.final_city_flash_active = 0;
+            gs.game_over = 1;
+            return 1;
+        }
+        gs.final_city_flash_ms -= delta_ms;
+        return 0;
+    }
 
     /* ── Read input ─────────────────────────────────────────────────────── */
     gs.cursor_x = hal_read_cursor_x();
@@ -761,10 +788,25 @@ int game_update(uint32_t delta_ms) {
         int alive = 0;
         for (int c = 0; c < NUM_CITIES; c++)
             if (gs.cities[c].alive) alive++;
-        if (alive == 0) { hal_play_sound(SND_GAME_OVER); gs.game_over = 1; return 1; }
+        if (alive == 0) {
+            hal_play_sound(SND_GAME_OVER);
+            gs.final_city_flash_active = 1;
+            gs.final_city_flash_ms = FINAL_CITY_FLASH_DURATION_MS;
+            return 0;
+        }
     }
 
     return 0;
+}
+
+static uint8_t final_city_fade_amount(uint32_t ms_left) {
+    uint32_t d = FINAL_CITY_FLASH_DURATION_MS;
+    if (ms_left >= d) return 0;
+
+    uint32_t elapsed = d - ms_left;
+    uint32_t a = (224u * elapsed * elapsed) / (d * d); /* smooth quadratic ramp-in */
+    if (a > 255u) a = 255u;
+    return (uint8_t)a;
 }
 
 void game_render(void) {
@@ -919,6 +961,10 @@ void game_render(void) {
             hal_draw_text(g_game_cfg.ui.hud_wave_x, 2, g_game_cfg.ui.hud_wave_label, g_game_cfg.ui.hud_label_color, COL_BLACK);
             hal_draw_text(g_game_cfg.ui.hud_wave_x + label_w, 2, &buf[i], g_game_cfg.ui.hud_wave_value_color, COL_BLACK);
         }
+    }
+
+    if (gs.final_city_flash_active) {
+        hal_fade_to_black(final_city_fade_amount(gs.final_city_flash_ms));
     }
 
     /* ── Wave complete overlay ───────────────────────────────────────────── */
