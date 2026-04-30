@@ -74,6 +74,13 @@ void hal_draw_line(int x0, int y0, int x1, int y1, uint16_t color);
 void hal_draw_circle(int cx, int cy, int r, uint16_t color);
 
 /**
+ * hal_draw_circle_top_half_gradient(cx, cy, r, color_edge) —
+ * filled semicircle with a white-hot core fading to color_edge.
+ * Used for ground impacts so blasts stay above the ground line.
+ */
+void hal_draw_circle_top_half_gradient(int cx, int cy, int r, uint16_t color_edge);
+
+/**
  * hal_draw_char(x, y, c, color, bg) — draw a single ASCII character (5×7 font).
  * bg = COL_BLACK means transparent (no background drawn) is up to the impl.
  */

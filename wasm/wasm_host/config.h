@@ -33,8 +33,11 @@
 /* ── Explosions ────────────────────────────────────────────────────────── */
 /* Max radius (pixels) of each explosion type. */
 #define EXPL_IMPACT_RADIUS   16   /* enemy hits ground or city */
+#define EXPL_GROUND_RADIUS   26   /* ground impact blast size   */
 #define EXPL_INTERCEPT_RADIUS 12  /* enemy missile shot down   */
 #define EXPL_PLAYER_RADIUS   22   /* player interceptor burst  */
+/* Positive = draw ground explosions lower (closer to bottom edge). */
+#define EXPL_GROUND_Y_OFFSET  10
 /* Colours as RGB (0–255 per channel). */
 /* Default originals: impact=orange, intercept=yellow, player=cyan */
 #define EXPL_IMPACT_R    255

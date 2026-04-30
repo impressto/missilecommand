@@ -104,13 +104,19 @@ static struct {
 
 /* ── Explosion settings (overridable from config.h for WASM build) ───────── */
 #ifndef EXPL_IMPACT_RADIUS
-#define EXPL_IMPACT_RADIUS    16
+#define EXPL_IMPACT_RADIUS    34
+#endif
+#ifndef EXPL_GROUND_RADIUS
+#define EXPL_GROUND_RADIUS EXPL_IMPACT_RADIUS
 #endif
 #ifndef EXPL_INTERCEPT_RADIUS
 #define EXPL_INTERCEPT_RADIUS 12
 #endif
 #ifndef EXPL_PLAYER_RADIUS
 #define EXPL_PLAYER_RADIUS    22
+#endif
+#ifndef EXPL_GROUND_Y_OFFSET
+#define EXPL_GROUND_Y_OFFSET   0
 #endif
 #ifndef EXPL_IMPACT_R
 #define EXPL_IMPACT_R    255
@@ -495,7 +501,7 @@ int game_update(uint32_t delta_ms) {
 
         /* Reached target or hit the ground */
         if (py >= m->ty || py >= GROUND_Y) {
-            spawn_explosion(px, GROUND_Y, EXPL_IMPACT_RADIUS, EXPL_IMPACT_COLOR);
+            spawn_explosion(px, GROUND_Y, EXPL_GROUND_RADIUS, EXPL_IMPACT_COLOR);
             m->active = 0;
             hal_play_sound(SND_IMPACT);
 
@@ -748,7 +754,13 @@ void game_render(void) {
     for (int i = 0; i < MAX_EXPLOSIONS; i++) {
         Explosion *e = &gs.explosions[i];
         if (!e->active) continue;
-        hal_draw_circle(e->x, e->y, e->radius, e->color);
+        if (e->y == GROUND_Y) {
+            /* Visual-only Y shift for ground blasts; physics stays at GROUND_Y. */
+            int draw_y = e->y + EXPL_GROUND_Y_OFFSET;
+            hal_draw_circle_top_half_gradient(e->x, draw_y, e->radius, e->color);
+        } else {
+            hal_draw_circle(e->x, e->y, e->radius, e->color);
+        }
     }
 
     /* ── Crosshair cursor ────────────────────────────────────────────────── */

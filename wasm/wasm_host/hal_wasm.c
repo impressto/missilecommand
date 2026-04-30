@@ -346,9 +346,16 @@ void hal_draw_circle_top_half_gradient(int cx, int cy, int r, uint16_t color_edg
     uint16_t color_white = RGB565(255, 255, 255);
     int steps = r;
     if (steps < 1) steps = 1;
+    int core_steps = steps / 3; /* Keep the inner third white for a hotter core */
+    if (core_steps < 1) core_steps = 1;
     
     for (int i = steps; i >= 0; i--) {
-        int ratio = i * 255 / steps;  /* 255 at edge (i=steps), 0 at center (i=0) */
+        int ratio;
+        if (i <= core_steps) {
+            ratio = 0;
+        } else {
+            ratio = (i - core_steps) * 255 / (steps - core_steps); /* 255 at edge, 0 at core boundary */
+        }
         uint16_t color = interpolate_rgb565_wasm(color_white, color_edge, ratio);
         int r_i = (int)((long)i * r / steps);
         
