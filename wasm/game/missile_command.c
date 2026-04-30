@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <string.h>   /* memset */
+#include <time.h>
 
 /* ── Integer square-root (no <math.h> needed) ───────────────────────────── */
 static int isqrt(int n) {
@@ -230,6 +231,19 @@ static uint32_t rng_next(void) {
     rng_state = rng_state * 1664525u + 1013904223u;
     return rng_state;
 }
+static void rng_seed_runtime(void) {
+    uint32_t seed = hal_ticks_ms();
+    seed ^= ((uint32_t)hal_read_cursor_x() << 16);
+    seed ^= ((uint32_t)hal_read_cursor_y() << 1);
+    seed ^= ((uint32_t)hal_read_input() << 24);
+    seed ^= (uint32_t)time(NULL);
+    seed ^= 0xA5A55A5Au;
+    if (seed == 0u) seed = 12345u;
+    rng_state = seed;
+    /* Warm up the LCG to decorrelate initial values from the raw seed bits. */
+    (void)rng_next();
+    (void)rng_next();
+}
 static int rng_range(int lo, int hi) {
     /* hi is exclusive */
     return lo + (int)((rng_next() >> 16) % (uint32_t)(hi - lo));
@@ -425,6 +439,7 @@ static void start_wave(int wave_num) {
 
 void game_init(void) {
     memset(&gs, 0, sizeof(gs));
+    rng_seed_runtime();
 
     gs.lives             = 3;
     gs.last_rebuild_threshold = 0;
