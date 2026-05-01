@@ -10,6 +10,13 @@
 #include "../game/missile_command.h"
 
 static uint32_t last_ticks = 0;
+static uint8_t  restart_prev_buttons = 0;
+static uint8_t  restart_wait_for_release = 0;
+
+#define RESTART_BTN_X 124
+#define RESTART_BTN_Y 126
+#define RESTART_BTN_W 72
+#define RESTART_BTN_H 14
 
 static void main_loop(void) {
     uint32_t now   = hal_ticks_ms();
@@ -19,13 +26,38 @@ static void main_loop(void) {
     /* Cap delta to prevent spiral-of-death after tab focus loss */
     if (delta > 100) delta = 100;
 
+    /* Swallow FIRE after a restart click so it does not launch a missile. */
+    if (restart_wait_for_release) {
+        uint8_t buttons = hal_read_input();
+        if (!(buttons & BTN_FIRE)) {
+            restart_wait_for_release = 0;
+        }
+        game_render();
+        return;
+    }
+
     int done = game_update(delta);
     game_render();
 
     if (done) {
-        /* Keep rendering the game-over screen; input would restart the game.
-           For now, stop the main loop. Students can add a restart feature. */
-        emscripten_cancel_main_loop();
+        uint8_t buttons = hal_read_input();
+        uint8_t fire_now = (uint8_t)(buttons & BTN_FIRE);
+        uint8_t fire_prev = (uint8_t)(restart_prev_buttons & BTN_FIRE);
+        int cursor_x = hal_read_cursor_x();
+        int cursor_y = hal_read_cursor_y();
+        int in_restart_button =
+            (cursor_x >= RESTART_BTN_X) && (cursor_x < (RESTART_BTN_X + RESTART_BTN_W)) &&
+            (cursor_y >= RESTART_BTN_Y) && (cursor_y < (RESTART_BTN_Y + RESTART_BTN_H));
+
+        /* Restart only on a fresh click/tap inside the Restart button area. */
+        if (fire_now && !fire_prev && in_restart_button) {
+            game_init();
+            last_ticks = hal_ticks_ms();
+            restart_wait_for_release = 1;
+        }
+        restart_prev_buttons = buttons;
+    } else {
+        restart_prev_buttons = 0;
     }
 }
 

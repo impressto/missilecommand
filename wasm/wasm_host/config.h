@@ -25,11 +25,11 @@
 
 /* ── Ground strip ────────────────────────────────────────────────────────── */
 /* Height of the coloured ground band at the bottom of the screen (pixels). */
-#define GROUND_HEIGHT   10
+#define GROUND_HEIGHT   4
 /* RGB colour of the ground strip (0–255 per channel). */
-#define GROUND_R        15
-#define GROUND_G        20
-#define GROUND_B        25
+#define GROUND_R        0
+#define GROUND_G        12
+#define GROUND_B        16
 /* ── Explosions ────────────────────────────────────────────────────────── */
 /* Max radius (pixels) of each explosion type. */
 #define EXPL_IMPACT_RADIUS   16   /* enemy hits ground or city */
@@ -37,7 +37,7 @@
 #define EXPL_INTERCEPT_RADIUS 12  /* enemy missile shot down   */
 #define EXPL_PLAYER_RADIUS   22   /* player interceptor burst  */
 /* Positive = draw ground explosions lower (closer to bottom edge). */
-#define EXPL_GROUND_Y_OFFSET  10
+#define EXPL_GROUND_Y_OFFSET  14
 /* Colours as RGB (0–255 per channel). */
 /* Default originals: impact=orange, intercept=yellow, player=cyan */
 #define EXPL_IMPACT_R    255
@@ -85,6 +85,8 @@
 #define TEXT_GAME_OVER_TITLE "GAME  OVER"
 /* Game-over subtitle shown under "GAME OVER". */
 #define TEXT_GAME_OVER_SUBTITLE "All barracks lost"
+/* Restart button label shown in the game-over overlay. */
+#define TEXT_GAME_OVER_RESTART_LABEL "RESTART"
 
 /* ── Enemy missile trail ────────────────────────────────────────────────── */
 /* Trail colour nearest the missile tip (hot exhaust core). */

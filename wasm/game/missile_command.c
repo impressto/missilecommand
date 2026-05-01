@@ -68,6 +68,7 @@ static struct {
     int      wave;
     int      lives;
     int      game_over;
+    int      game_over_pending;
 
     /* Wave management */
     int      enemies_to_launch;   /* total enemies for this wave */
@@ -213,6 +214,9 @@ static struct {
 #endif
 #ifndef TEXT_GAME_OVER_SUBTITLE
 #define TEXT_GAME_OVER_SUBTITLE "All cities lost"
+#endif
+#ifndef TEXT_GAME_OVER_RESTART_LABEL
+#define TEXT_GAME_OVER_RESTART_LABEL "RESTART"
 #endif
 
 /* ── Enemy missile trail history (ring buffer, one per missile slot) ─────── */
@@ -394,6 +398,36 @@ static int point_in_explosion(int x, int y) {
     return 0;
 }
 
+/* Advance all active explosions; returns 1 if any remain active. */
+static int animate_explosions(uint32_t delta_ms) {
+    int any_active = 0;
+
+    for (int i = 0; i < MAX_EXPLOSIONS; i++) {
+        Explosion *e = &gs.explosions[i];
+        if (!e->active) continue;
+
+        int growth = (int)((20u * delta_ms) / 1000u) + 1; /* ~20 px/sec */
+
+        if (e->growing) {
+            e->radius += growth;
+            if (e->radius >= e->max_radius) {
+                e->radius = e->max_radius;
+                e->growing = 0;
+            }
+            any_active = 1;
+        } else {
+            e->radius -= growth;
+            if (e->radius <= 0) {
+                e->active = 0;
+            } else {
+                any_active = 1;
+            }
+        }
+    }
+
+    return any_active;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  * Public API
  * ══════════════════════════════════════════════════════════════════════════ */
@@ -466,6 +500,14 @@ void game_init(void) {
 
 int game_update(uint32_t delta_ms) {
     if (gs.game_over) return 1;
+
+    if (gs.game_over_pending) {
+        if (!animate_explosions(delta_ms)) {
+            gs.game_over = 1;
+            return 1;
+        }
+        return 0;
+    }
 
     /* ── Read input ─────────────────────────────────────────────────────── */
     gs.cursor_x = hal_read_cursor_x();
@@ -576,20 +618,7 @@ int game_update(uint32_t delta_ms) {
     }
 
     /* ── Animate explosions ──────────────────────────────────────────────── */
-    for (int i = 0; i < MAX_EXPLOSIONS; i++) {
-        Explosion *e = &gs.explosions[i];
-        if (!e->active) continue;
-
-        int growth = (int)((20u * delta_ms) / 1000u) + 1; /* ~20 px/sec */
-
-        if (e->growing) {
-            e->radius += growth;
-            if (e->radius >= e->max_radius) { e->radius = e->max_radius; e->growing = 0; }
-        } else {
-            e->radius -= growth;
-            if (e->radius <= 0) e->active = 0;
-        }
-    }
+    animate_explosions(delta_ms);
 
     /* ── Wave complete logic ─────────────────────────────────────────────── */
     if (!gs.wave_complete) {
@@ -656,7 +685,12 @@ int game_update(uint32_t delta_ms) {
         int alive = 0;
         for (int c = 0; c < NUM_CITIES; c++)
             if (gs.cities[c].alive) alive++;
-        if (alive == 0) { hal_play_sound(SND_GAME_OVER); gs.game_over = 1; return 1; }
+        if (alive == 0) {
+            if (!gs.game_over_pending) {
+                hal_play_sound(SND_GAME_OVER);
+                gs.game_over_pending = 1;
+            }
+        }
     }
 
     return 0;
@@ -851,17 +885,24 @@ void game_render(void) {
     
     /* ── Game over overlay ───────────────────────────────────────────────── */
     if (gs.game_over) {
-        hal_draw_rect(80, 100, 160, 40, COL_BLACK);
+        hal_draw_rect(80, 96, 160, 56, COL_BLACK);
 
         int title_len = (int)strlen(TEXT_GAME_OVER_TITLE);
         int subtitle_len = (int)strlen(TEXT_GAME_OVER_SUBTITLE);
+        int restart_len = (int)strlen(TEXT_GAME_OVER_RESTART_LABEL);
         int title_w = (title_len > 0) ? (6 * title_len - 1) : 0;
         int subtitle_w = (subtitle_len > 0) ? (6 * subtitle_len - 1) : 0;
+        int restart_w = (restart_len > 0) ? (6 * restart_len - 1) : 0;
         int title_x = (SCREEN_W - title_w) / 2;
         int subtitle_x = (SCREEN_W - subtitle_w) / 2;
+        int restart_x = (SCREEN_W - restart_w) / 2;
 
-        hal_draw_text(title_x, 108, TEXT_GAME_OVER_TITLE, COL_RED, COL_BLACK);
-        hal_draw_text(subtitle_x, 122, TEXT_GAME_OVER_SUBTITLE, COL_WHITE, COL_BLACK);
+        hal_draw_text(title_x, 102, TEXT_GAME_OVER_TITLE, COL_RED, COL_BLACK);
+        hal_draw_text(subtitle_x, 114, TEXT_GAME_OVER_SUBTITLE, COL_WHITE, COL_BLACK);
+
+        /* Visible restart button area for click/tap users. */
+        hal_draw_rect(124, 126, 72, 14, COL_DKBLUE);
+        hal_draw_text(restart_x, 130, TEXT_GAME_OVER_RESTART_LABEL, COL_YELLOW, COL_DKBLUE);
     }
 
     hal_present();
