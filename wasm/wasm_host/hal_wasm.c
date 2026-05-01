@@ -18,6 +18,10 @@
 #include <stdint.h>
 #include <time.h>
 
+#ifndef AUDIO_MAX_VOLUME
+#define AUDIO_MAX_VOLUME 1.0f
+#endif
+
 /* ── Forward declarations ────────────────────────────────────────────────── */
 static int isqrt_approx(int n);
 
@@ -134,24 +138,43 @@ EM_JS(void, js_setup_input, (void), {
 });
 
 /* Play one-shot sound effect from preloaded assets in the Emscripten FS. */
-EM_JS(void, js_play_sound, (int sound_id), {
+EM_JS(int, js_play_sound_instance, (int sound_id), {
     const SOUND_FILES = [
-        '/missile-2.mp3',   /* SND_LAUNCH */
+        null,               /* SND_LAUNCH (disabled) */
         '/swoop-up.mp3',    /* SND_PLAYER_BURST */
         '/explosions.mp3',  /* SND_INTERCEPT */
         '/explode.mp3',     /* SND_IMPACT */
-        '/alert.mp3',       /* SND_ALERT */
+        '/incoming-missile.mp3', /* SND_ALERT */
         '/roll-up.mp3',     /* SND_WAVE_COMPLETE */
         '/finale.mp3'       /* SND_GAME_OVER */
     ];
 
-    if (sound_id < 0 || sound_id >= SOUND_FILES.length) return;
+    if (sound_id < 0 || sound_id >= SOUND_FILES.length) return 0;
 
     const path = SOUND_FILES[sound_id];
+    if (!path) return 0;
+
+    if (!Module._soundApplyMasterVolume) {
+        Module._soundApplyMasterVolume = function(volume) {
+            const maxVolumeRaw = (typeof Module._maxVolume === 'number') ? Module._maxVolume : 1.0;
+            const maxVolume = Math.max(0, Math.min(1, Number(maxVolumeRaw)));
+            const clamped = Math.max(0, Math.min(maxVolume, Number(volume)));
+            Module._masterVolume = Number.isFinite(clamped) ? clamped : Math.min(0.7, maxVolume);
+            if (Module._soundActiveVoices) {
+                Module._soundActiveVoices.forEach(function(voice) {
+                    voice.volume = Module._masterVolume;
+                });
+            }
+        };
+    }
+
     const volume = (typeof Module._masterVolume === 'number') ? Module._masterVolume : 0.7;
 
     if (!Module._soundTemplateCache) Module._soundTemplateCache = {};
     if (!Module._soundBlobUrlCache) Module._soundBlobUrlCache = {};
+    if (!Module._soundActiveVoices) Module._soundActiveVoices = new Set();
+    if (!Module._soundVoiceById) Module._soundVoiceById = new Map();
+    if (typeof Module._nextSoundVoiceId !== 'number') Module._nextSoundVoiceId = 1;
 
     let template = Module._soundTemplateCache[path];
     if (!template) {
@@ -166,15 +189,67 @@ EM_JS(void, js_play_sound, (int sound_id), {
             Module._soundTemplateCache[path] = template;
         } catch (e) {
             console.warn('Failed to load sound:', path, e);
-            return;
+            return 0;
         }
     }
 
     const voice = template.cloneNode();
     voice.volume = Math.max(0, Math.min(1, volume));
+
+    const voiceId = Module._nextSoundVoiceId++;
+    Module._soundVoiceById.set(voiceId, voice);
+    Module._soundActiveVoices.add(voice);
+
+    const releaseVoice = function() {
+        Module._soundVoiceById.delete(voiceId);
+        Module._soundActiveVoices.delete(voice);
+        voice.removeEventListener('ended', releaseVoice);
+        voice.removeEventListener('error', releaseVoice);
+    };
+
+    voice.addEventListener('ended', releaseVoice);
+    voice.addEventListener('error', releaseVoice);
+
     voice.play().catch(function() {
+        releaseVoice();
         /* Autoplay policies may block play until user input; ignore silently. */
     });
+
+    return voiceId;
+});
+
+EM_JS(void, js_stop_sound_instance, (int instance_id), {
+    if (!instance_id || !Module._soundVoiceById) return;
+
+    const voice = Module._soundVoiceById.get(instance_id);
+    if (!voice) return;
+
+    Module._soundVoiceById.delete(instance_id);
+    if (Module._soundActiveVoices) Module._soundActiveVoices.delete(voice);
+
+    try {
+        voice.pause();
+        voice.currentTime = 0;
+    } catch (e) {
+        /* Ignore stop errors from torn-down audio elements. */
+    }
+});
+
+EM_JS(void, js_play_sound, (int sound_id), {
+    js_play_sound_instance(sound_id);
+});
+
+EM_JS(void, js_set_audio_max_volume, (double max_volume), {
+    const maxVolume = Math.max(0, Math.min(1, Number(max_volume)));
+    Module._maxVolume = Number.isFinite(maxVolume) ? maxVolume : 1.0;
+
+    if (typeof Module._soundApplyMasterVolume === 'function') {
+        const current = (typeof Module._masterVolume === 'number') ? Module._masterVolume : Module._maxVolume;
+        Module._soundApplyMasterVolume(current);
+    } else {
+        const current = (typeof Module._masterVolume === 'number') ? Module._masterVolume : 0.7;
+        Module._masterVolume = Math.max(0, Math.min(Module._maxVolume, current));
+    }
 });
 
 /* Exported C functions called from JS (must be kept with EMSCRIPTEN_KEEPALIVE) */
@@ -204,6 +279,7 @@ EMSCRIPTEN_KEEPALIVE void hal_wasm_tap_at(int x, int y) {
 void hal_init(void) {
     memset(fb, 0, sizeof(fb));
     g_start_ms = (uint32_t)(emscripten_get_now());
+    js_set_audio_max_volume((double)AUDIO_MAX_VOLUME);
 
     /* Load background PNG via LodePNG (file is preloaded into WASM FS) */
     unsigned char *raw = NULL;
@@ -575,6 +651,15 @@ void hal_draw_ground(void) {
 
 void hal_play_sound(int sound_id) {
     js_play_sound(sound_id);
+}
+
+int hal_play_sound_instance(int sound_id) {
+    return js_play_sound_instance(sound_id);
+}
+
+void hal_stop_sound_instance(int instance_id) {
+    if (instance_id == 0) return;
+    js_stop_sound_instance(instance_id);
 }
 
 void hal_present(void) {

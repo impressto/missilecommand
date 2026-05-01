@@ -42,11 +42,10 @@ LDFLAGS := \
     --preload-file ../images/background-1.png@background-1.png \
     --preload-file ../images/civilian-target.png@civilian-target.png \
     --preload-file ../images/bunker-1.png@bunker-1.png \
-    --preload-file ../sounds/alert.mp3@alert.mp3 \
     --preload-file ../sounds/explode.mp3@explode.mp3 \
     --preload-file ../sounds/explosions.mp3@explosions.mp3 \
     --preload-file ../sounds/finale.mp3@finale.mp3 \
-    --preload-file ../sounds/missile-2.mp3@missile-2.mp3 \
+    --preload-file ../sounds/incoming-missile.mp3@incoming-missile.mp3 \
     --preload-file ../sounds/roll-up.mp3@roll-up.mp3 \
     --preload-file ../sounds/swoop-up.mp3@swoop-up.mp3 \
     -o $(OUTDIR)/missile_command.html
@@ -59,8 +58,9 @@ $(OUTDIR):
 	mkdir -p $(OUTDIR)
 
 IMAGES  := ../images/background-1.png ../images/civilian-target.png ../images/bunker-1.png
-SOUNDS  := ../sounds/alert.mp3 ../sounds/explode.mp3 ../sounds/explosions.mp3 \
-           ../sounds/finale.mp3 ../sounds/missile-2.mp3 \
+SOUNDS  := ../sounds/explode.mp3 ../sounds/explosions.mp3 \
+           ../sounds/finale.mp3 \
+           ../sounds/incoming-missile.mp3 \
            ../sounds/roll-up.mp3 ../sounds/swoop-up.mp3
 
 $(TARGET): $(SRCS) shell.html ../game/hal.h ../game/missile_command.h config.h $(IMAGES) $(SOUNDS)

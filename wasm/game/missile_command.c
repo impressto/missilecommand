@@ -33,6 +33,7 @@ typedef struct {
     int x, y;          /* fixed-point position */
     int vx, vy;        /* fixed-point velocity (pixels per second in FP) */
     int tx, ty;        /* integer target pixel */
+    int sound_instance_id; /* incoming-missile audio instance handle */
 } Missile;
 
 typedef struct {
@@ -329,11 +330,11 @@ static void spawn_enemy_missile(void) {
             m->ty = ty;
             m->vx = (speed_fp * dx) / dist;
             m->vy = (speed_fp * dy) / dist;
+            m->sound_instance_id = hal_play_sound_instance(SND_ALERT);
             
             gs.enemies_launched++;
             trail_hist_head[i]  = 0;
             trail_hist_count[i] = 0;
-            hal_play_sound(SND_ALERT);
             return;
         }
     }
@@ -472,6 +473,13 @@ static void start_wave(int wave_num) {
 }
 
 void game_init(void) {
+    for (int i = 0; i < MAX_ENEMY_MISSILES; i++) {
+        int sid = gs.enemies[i].sound_instance_id;
+        if (sid != 0) {
+            hal_stop_sound_instance(sid);
+        }
+    }
+
     memset(&gs, 0, sizeof(gs));
     rng_seed_runtime();
 
@@ -559,6 +567,10 @@ int game_update(uint32_t delta_ms) {
         /* Reached target or hit the ground */
         if (py >= m->ty || py >= GROUND_Y) {
             spawn_explosion(px, GROUND_Y, EXPL_GROUND_RADIUS, EXPL_IMPACT_COLOR);
+            if (m->sound_instance_id != 0) {
+                hal_stop_sound_instance(m->sound_instance_id);
+                m->sound_instance_id = 0;
+            }
             m->active = 0;
             hal_play_sound(SND_IMPACT);
 
@@ -587,6 +599,10 @@ int game_update(uint32_t delta_ms) {
         /* Intercepted by player explosion */
         if (m->active && point_in_explosion(FP_TO_INT(m->x), FP_TO_INT(m->y))) {
             spawn_explosion(FP_TO_INT(m->x), FP_TO_INT(m->y), EXPL_INTERCEPT_RADIUS, EXPL_INTERCEPT_COLOR);
+            if (m->sound_instance_id != 0) {
+                hal_stop_sound_instance(m->sound_instance_id);
+                m->sound_instance_id = 0;
+            }
             m->active = 0;
             hal_play_sound(SND_INTERCEPT);
             
@@ -687,6 +703,13 @@ int game_update(uint32_t delta_ms) {
             if (gs.cities[c].alive) alive++;
         if (alive == 0) {
             if (!gs.game_over_pending) {
+                for (int i = 0; i < MAX_ENEMY_MISSILES; i++) {
+                    int sid = gs.enemies[i].sound_instance_id;
+                    if (sid != 0) {
+                        hal_stop_sound_instance(sid);
+                        gs.enemies[i].sound_instance_id = 0;
+                    }
+                }
                 hal_play_sound(SND_GAME_OVER);
                 gs.game_over_pending = 1;
             }

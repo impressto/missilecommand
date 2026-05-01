@@ -88,6 +88,10 @@
 /* Restart button label shown in the game-over overlay. */
 #define TEXT_GAME_OVER_RESTART_LABEL "RESTART"
 
+/* ── Audio ──────────────────────────────────────────────────────────────── */
+/* Master volume ceiling for WASM audio: 0.0 (mute) to 1.0 (full). */
+#define AUDIO_MAX_VOLUME 0.70f
+
 /* ── Enemy missile trail ────────────────────────────────────────────────── */
 /* Trail colour nearest the missile tip (hot exhaust core). */
 #define TRAIL_LEAD_R   255

@@ -158,6 +158,7 @@
   <script>
     var Module = {
       canvas: document.getElementById('gameCanvas'),
+      _maxVolume: 1.0,
       _masterVolume: 0.7,
       onRuntimeInitialized: function() {
         document.getElementById('loadingMsg').style.display = 'none';
@@ -167,11 +168,24 @@
     (function() {
       var slider = document.getElementById('volumeSlider');
       var label  = document.getElementById('volumeValue');
+
+      function setVolumeFromPercent(pct) {
+        var maxVolume = (typeof Module._maxVolume === 'number') ? Module._maxVolume : 1.0;
+        var normalized = (pct / 100) * maxVolume;
+        if (typeof Module._soundApplyMasterVolume === 'function') {
+          Module._soundApplyMasterVolume(normalized);
+        } else {
+          Module._masterVolume = normalized;
+        }
+      }
+
       slider.addEventListener('input', function() {
         var pct = parseInt(slider.value, 10);
         label.textContent = pct + '%';
-        Module._masterVolume = pct / 100;
+        setVolumeFromPercent(pct);
       });
+
+      setVolumeFromPercent(parseInt(slider.value, 10));
     })();
   </script>
   {{{ SCRIPT }}}

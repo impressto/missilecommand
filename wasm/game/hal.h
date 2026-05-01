@@ -171,4 +171,16 @@ void hal_delay_ms(uint32_t ms);
  */
 void hal_play_sound(int sound_id);
 
+/**
+ * hal_play_sound_instance(sound_id) — start one sound instance and return
+ * a platform-specific instance handle (>0), or 0 on failure/unsupported.
+ */
+int hal_play_sound_instance(int sound_id);
+
+/**
+ * hal_stop_sound_instance(instance_id) — stop a previously started instance.
+ * Passing 0 is a no-op.
+ */
+void hal_stop_sound_instance(int instance_id);
+
 #endif /* HAL_H */
