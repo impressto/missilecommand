@@ -116,6 +116,36 @@
 #endif
 #endif
 
+#ifndef CFG_PLAYER_TRAIL_LEN
+#ifdef PLAYER_TRAIL_LEN
+#define CFG_PLAYER_TRAIL_LEN PLAYER_TRAIL_LEN
+#else
+#define CFG_PLAYER_TRAIL_LEN 16
+#endif
+#endif
+#ifndef CFG_PLAYER_TRAIL_LEAD_R
+#ifdef PLAYER_TRAIL_LEAD_R
+#define CFG_PLAYER_TRAIL_LEAD_R PLAYER_TRAIL_LEAD_R
+#define CFG_PLAYER_TRAIL_LEAD_G PLAYER_TRAIL_LEAD_G
+#define CFG_PLAYER_TRAIL_LEAD_B PLAYER_TRAIL_LEAD_B
+#else
+#define CFG_PLAYER_TRAIL_LEAD_R 120
+#define CFG_PLAYER_TRAIL_LEAD_G 180
+#define CFG_PLAYER_TRAIL_LEAD_B 255
+#endif
+#endif
+#ifndef CFG_PLAYER_TRAIL_TAIL_R
+#ifdef PLAYER_TRAIL_TAIL_R
+#define CFG_PLAYER_TRAIL_TAIL_R PLAYER_TRAIL_TAIL_R
+#define CFG_PLAYER_TRAIL_TAIL_G PLAYER_TRAIL_TAIL_G
+#define CFG_PLAYER_TRAIL_TAIL_B PLAYER_TRAIL_TAIL_B
+#else
+#define CFG_PLAYER_TRAIL_TAIL_R 28
+#define CFG_PLAYER_TRAIL_TAIL_G 44
+#define CFG_PLAYER_TRAIL_TAIL_B 72
+#endif
+#endif
+
 #ifndef CFG_AMMO_INDICATOR_SIZE
 #ifdef AMMO_INDICATOR_SIZE
 #define CFG_AMMO_INDICATOR_SIZE AMMO_INDICATOR_SIZE
@@ -237,6 +267,13 @@ const GameConfig g_game_cfg = {
         .tip_color = RGB565(CFG_TRAIL_TIP_R, CFG_TRAIL_TIP_G, CFG_TRAIL_TIP_B),
         .fade_dist = CFG_TRAIL_FADE_DIST,
         .enemy_render_min_y = CFG_ENEMY_RENDER_MIN_Y,
+        .player_len = CFG_PLAYER_TRAIL_LEN,
+        .player_lead_r = CFG_PLAYER_TRAIL_LEAD_R,
+        .player_lead_g = CFG_PLAYER_TRAIL_LEAD_G,
+        .player_lead_b = CFG_PLAYER_TRAIL_LEAD_B,
+        .player_tail_r = CFG_PLAYER_TRAIL_TAIL_R,
+        .player_tail_g = CFG_PLAYER_TRAIL_TAIL_G,
+        .player_tail_b = CFG_PLAYER_TRAIL_TAIL_B,
     },
     .ammo = {
         .indicator_size = CFG_AMMO_INDICATOR_SIZE,

@@ -33,6 +33,7 @@ typedef struct {
     int x, y;          /* fixed-point position */
     int vx, vy;        /* fixed-point velocity (pixels per second in FP) */
     int tx, ty;        /* integer target pixel */
+    int ox, oy;        /* integer launch origin pixel */
     int sound_instance_id; /* incoming-missile audio instance handle */
 } Missile;
 
@@ -140,33 +141,65 @@ static struct {
 #define EXPL_INTERCEPT_COLOR RGB565(EXPL_INTERCEPT_R, EXPL_INTERCEPT_G, EXPL_INTERCEPT_B)
 #define EXPL_PLAYER_COLOR    RGB565(EXPL_PLAYER_R,    EXPL_PLAYER_G,    EXPL_PLAYER_B)
 
-/* ── Missile trail settings (overridable from config.h for WASM build) ───── */
-#ifndef TRAIL_LEAD_R
-#ifdef TRAIL_R
-#define TRAIL_LEAD_R TRAIL_R
-#define TRAIL_LEAD_G TRAIL_G
-#define TRAIL_LEAD_B TRAIL_B
+/* ── Enemy missile trail settings (overridable from config.h for WASM) ───── */
+#ifndef ENEMY_TRAIL_LEAD_R
+#ifdef TRAIL_LEAD_R
+#define ENEMY_TRAIL_LEAD_R TRAIL_LEAD_R
+#define ENEMY_TRAIL_LEAD_G TRAIL_LEAD_G
+#define ENEMY_TRAIL_LEAD_B TRAIL_LEAD_B
+#elif defined(TRAIL_R)
+#define ENEMY_TRAIL_LEAD_R TRAIL_R
+#define ENEMY_TRAIL_LEAD_G TRAIL_G
+#define ENEMY_TRAIL_LEAD_B TRAIL_B
 #else
-#define TRAIL_LEAD_R 255
-#define TRAIL_LEAD_G 120
-#define TRAIL_LEAD_B   0
+#define ENEMY_TRAIL_LEAD_R 255
+#define ENEMY_TRAIL_LEAD_G 120
+#define ENEMY_TRAIL_LEAD_B   0
 #endif
 #endif
-#ifndef TRAIL_TAIL_R
-#define TRAIL_TAIL_R 255
-#define TRAIL_TAIL_G  32
-#define TRAIL_TAIL_B   0
+#ifndef ENEMY_TRAIL_TAIL_R
+#ifdef TRAIL_TAIL_R
+#define ENEMY_TRAIL_TAIL_R TRAIL_TAIL_R
+#define ENEMY_TRAIL_TAIL_G TRAIL_TAIL_G
+#define ENEMY_TRAIL_TAIL_B TRAIL_TAIL_B
+#else
+#define ENEMY_TRAIL_TAIL_R 255
+#define ENEMY_TRAIL_TAIL_G  32
+#define ENEMY_TRAIL_TAIL_B   0
 #endif
-#ifndef TRAIL_TIP_R
-#define TRAIL_TIP_R 255
-#define TRAIL_TIP_G 255
-#define TRAIL_TIP_B 255
 #endif
-#define TRAIL_LEAD_COLOR RGB565(TRAIL_LEAD_R, TRAIL_LEAD_G, TRAIL_LEAD_B)
-#define TRAIL_TAIL_COLOR RGB565(TRAIL_TAIL_R, TRAIL_TAIL_G, TRAIL_TAIL_B)
-#define TRAIL_TIP_COLOR RGB565(TRAIL_TIP_R, TRAIL_TIP_G, TRAIL_TIP_B)
-#ifndef TRAIL_FADE_DIST
-#define TRAIL_FADE_DIST 60
+#ifndef ENEMY_TRAIL_TIP_R
+#ifdef TRAIL_TIP_R
+#define ENEMY_TRAIL_TIP_R TRAIL_TIP_R
+#define ENEMY_TRAIL_TIP_G TRAIL_TIP_G
+#define ENEMY_TRAIL_TIP_B TRAIL_TIP_B
+#else
+#define ENEMY_TRAIL_TIP_R 255
+#define ENEMY_TRAIL_TIP_G 255
+#define ENEMY_TRAIL_TIP_B 255
+#endif
+#endif
+#ifndef ENEMY_TRAIL_FADE_DIST
+#ifdef TRAIL_FADE_DIST
+#define ENEMY_TRAIL_FADE_DIST TRAIL_FADE_DIST
+#else
+#define ENEMY_TRAIL_FADE_DIST 60
+#endif
+#endif
+
+/* ── Player missile trail settings (overridable from config.h for WASM) ─── */
+#ifndef PLAYER_TRAIL_LEN
+#define PLAYER_TRAIL_LEN 4
+#endif
+#ifndef PLAYER_TRAIL_LEAD_R
+#define PLAYER_TRAIL_LEAD_R 120
+#define PLAYER_TRAIL_LEAD_G 180
+#define PLAYER_TRAIL_LEAD_B 255
+#endif
+#ifndef PLAYER_TRAIL_TAIL_R
+#define PLAYER_TRAIL_TAIL_R  28
+#define PLAYER_TRAIL_TAIL_G  44
+#define PLAYER_TRAIL_TAIL_B  72
 #endif
 
 /* Enemy missile rendering clip (hide in top UI border area). */
@@ -328,6 +361,8 @@ static void spawn_enemy_missile(void) {
             m->y  = INT_TO_FP(sy);
             m->tx = tx;
             m->ty = ty;
+            m->ox = sx;
+            m->oy = sy;
             m->vx = (speed_fp * dx) / dist;
             m->vy = (speed_fp * dy) / dist;
             m->sound_instance_id = hal_play_sound_instance(SND_ALERT);
@@ -376,6 +411,8 @@ static void player_fire(void) {
             m->y  = INT_TO_FP(sy);
             m->tx = cx;
             m->ty = cy;
+            m->ox = sx;
+            m->oy = sy;
             m->vx = (speed_fp * dx) / dist;
             m->vy = (speed_fp * dy) / dist;
 
@@ -782,7 +819,7 @@ void game_render(void) {
         
         /* Draw curved trail by walking the position-history ring buffer */
         {
-            int blend_den = TRAIL_FADE_DIST > 1 ? TRAIL_FADE_DIST - 1 : 1;
+            int blend_den = ENEMY_TRAIL_FADE_DIST > 1 ? ENEMY_TRAIL_FADE_DIST - 1 : 1;
             int dist = 0;
             int prev_hx = px, prev_hy = py;
             int count = (int)trail_hist_count[i];
@@ -794,12 +831,12 @@ void game_render(void) {
                 int ddx = prev_hx - hx; if (ddx < 0) ddx = -ddx;
                 int ddy = prev_hy - hy; if (ddy < 0) ddy = -ddy;
                 dist += ddx > ddy ? ddx : ddy; /* Chebyshev step distance */
-                if (dist >= TRAIL_FADE_DIST) break;
+                if (dist >= ENEMY_TRAIL_FADE_DIST) break;
                 if (hy >= ENEMY_RENDER_MIN_Y) {
                     int blend = (dist * 255) / blend_den;
-                    uint8_t r = (uint8_t)((TRAIL_LEAD_R * (255 - blend) + TRAIL_TAIL_R * blend) / 255);
-                    uint8_t g = (uint8_t)((TRAIL_LEAD_G * (255 - blend) + TRAIL_TAIL_G * blend) / 255);
-                    uint8_t b = (uint8_t)((TRAIL_LEAD_B * (255 - blend) + TRAIL_TAIL_B * blend) / 255);
+                    uint8_t r = (uint8_t)((ENEMY_TRAIL_LEAD_R * (255 - blend) + ENEMY_TRAIL_TAIL_R * blend) / 255);
+                    uint8_t g = (uint8_t)((ENEMY_TRAIL_LEAD_G * (255 - blend) + ENEMY_TRAIL_TAIL_G * blend) / 255);
+                    uint8_t b = (uint8_t)((ENEMY_TRAIL_LEAD_B * (255 - blend) + ENEMY_TRAIL_TAIL_B * blend) / 255);
                     hal_draw_pixel(hx, hy, RGB565(r, g, b));
                 }
                 prev_hx = hx;
@@ -807,7 +844,7 @@ void game_render(void) {
             }
         }
         if (py >= ENEMY_RENDER_MIN_Y) {
-            hal_draw_pixel(px, py, TRAIL_TIP_COLOR);
+            hal_draw_pixel(px, py, RGB565(ENEMY_TRAIL_TIP_R, ENEMY_TRAIL_TIP_G, ENEMY_TRAIL_TIP_B));
         }
     }
 
@@ -817,6 +854,28 @@ void game_render(void) {
         if (!m->active) continue;
         int px = FP_TO_INT(m->x);
         int py = FP_TO_INT(m->y);
+
+        /* Subtle exhaust trail pointing back toward launch origin. */
+        {
+            int dx = px - m->ox;
+            int dy = py - m->oy;
+            int mag = isqrt(dx * dx + dy * dy);
+            if (mag > 0) {
+                int steps = PLAYER_TRAIL_LEN;
+                if (steps > mag) steps = mag;
+                int den = steps > 1 ? (steps - 1) : 1;
+                for (int t = 1; t <= steps; t++) {
+                    int blend = ((t - 1) * 255) / den;
+                    uint8_t r = (uint8_t)((PLAYER_TRAIL_LEAD_R * (255 - blend) + PLAYER_TRAIL_TAIL_R * blend) / 255);
+                    uint8_t g = (uint8_t)((PLAYER_TRAIL_LEAD_G * (255 - blend) + PLAYER_TRAIL_TAIL_G * blend) / 255);
+                    uint8_t b = (uint8_t)((PLAYER_TRAIL_LEAD_B * (255 - blend) + PLAYER_TRAIL_TAIL_B * blend) / 255);
+                    int tx = px - (dx * t) / mag;
+                    int ty = py - (dy * t) / mag;
+                    hal_draw_pixel(tx, ty, RGB565(r, g, b));
+                }
+            }
+        }
+
         hal_draw_pixel(px,     py,     COL_WHITE);
         hal_draw_pixel(px + 1, py,     COL_GRAY);
         hal_draw_pixel(px,     py + 1, COL_GRAY);

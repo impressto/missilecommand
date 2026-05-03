@@ -94,21 +94,33 @@
 
 /* ── Enemy missile trail ────────────────────────────────────────────────── */
 /* Trail colour nearest the missile tip (hot exhaust core). */
-#define TRAIL_LEAD_R   255
-#define TRAIL_LEAD_G   220
-#define TRAIL_LEAD_B   120
+#define ENEMY_TRAIL_LEAD_R   255
+#define ENEMY_TRAIL_LEAD_G   220
+#define ENEMY_TRAIL_LEAD_B   120
 /* Trail colour farther behind the missile (cooler exhaust plume). */
-#define TRAIL_TAIL_R   0
-#define TRAIL_TAIL_G    16
-#define TRAIL_TAIL_B     32
+#define ENEMY_TRAIL_TAIL_R   0
+#define ENEMY_TRAIL_TAIL_G   16
+#define ENEMY_TRAIL_TAIL_B   32
 /* Tip pixel colour (default: white). */
-#define TRAIL_TIP_R 255
-#define TRAIL_TIP_G 255
-#define TRAIL_TIP_B 255
+#define ENEMY_TRAIL_TIP_R 255
+#define ENEMY_TRAIL_TIP_G 255
+#define ENEMY_TRAIL_TIP_B 255
 /* Do not render enemy missiles or trails inside the top border area. */
 #define ENEMY_RENDER_MIN_Y 24
 /* Pixels from the tip over which the trail fades to nothing.
    Increase for a longer tail; set to 240 to show the full trail undimmed. */
-#define TRAIL_FADE_DIST 60
+#define ENEMY_TRAIL_FADE_DIST 60
+
+/* ── Defensive (player) missile trail ───────────────────────────────────── */
+/* Number of pixels in the outgoing missile trail. Keep low for subtlety. */
+#define PLAYER_TRAIL_LEN 16
+/* Trail colour nearest missile body (brightest point of exhaust). */
+#define PLAYER_TRAIL_LEAD_R 120
+#define PLAYER_TRAIL_LEAD_G 180
+#define PLAYER_TRAIL_LEAD_B 255
+/* Trail colour farthest from missile body (cool/faded end). */
+#define PLAYER_TRAIL_TAIL_R  28
+#define PLAYER_TRAIL_TAIL_G  44
+#define PLAYER_TRAIL_TAIL_B  72
 
 #endif /* CONFIG_H */

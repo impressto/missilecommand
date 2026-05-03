@@ -34,6 +34,7 @@ typedef struct {
     int x, y;          /* fixed-point position */
     int vx, vy;        /* fixed-point velocity (pixels per second in FP) */
     int tx, ty;        /* integer target pixel */
+    int ox, oy;        /* integer launch origin pixel */
 } Missile;
 
 typedef struct {
@@ -222,6 +223,8 @@ static void spawn_enemy_missile(void) {
             m->y  = INT_TO_FP(sy);
             m->tx = tx;
             m->ty = ty;
+            m->ox = sx;
+            m->oy = sy;
             m->vx = (speed_fp * dx) / dist;
             m->vy = (speed_fp * dy) / dist;
             
@@ -270,6 +273,8 @@ static int player_fire(void) {
             m->y  = INT_TO_FP(sy);
             m->tx = cx;
             m->ty = cy;
+            m->ox = sx;
+            m->oy = sy;
             m->vx = (speed_fp * dx) / dist;
             m->vy = (speed_fp * dy) / dist;
 
@@ -907,6 +912,31 @@ void game_render(void) {
         if (!m->active) continue;
         int px = FP_TO_INT(m->x);
         int py = FP_TO_INT(m->y);
+
+        /* Trail follows actual launch direction, pointing back to its bunker. */
+        {
+            int dx = px - m->ox;
+            int dy = py - m->oy;
+            int mag = isqrt(dx * dx + dy * dy);
+            if (mag > 0) {
+                int steps = g_game_cfg.trail.player_len;
+                if (steps > mag) steps = mag;
+                if (steps < 0) steps = 0;
+                if (steps > 0) {
+                    int den = steps > 1 ? (steps - 1) : 1;
+                    for (int t = 1; t <= steps; t++) {
+                        int blend = ((t - 1) * 255) / den;
+                        uint8_t r = (uint8_t)((g_game_cfg.trail.player_lead_r * (255 - blend) + g_game_cfg.trail.player_tail_r * blend) / 255);
+                        uint8_t g = (uint8_t)((g_game_cfg.trail.player_lead_g * (255 - blend) + g_game_cfg.trail.player_tail_g * blend) / 255);
+                        uint8_t b = (uint8_t)((g_game_cfg.trail.player_lead_b * (255 - blend) + g_game_cfg.trail.player_tail_b * blend) / 255);
+                        int tx = px - (dx * t) / mag;
+                        int ty = py - (dy * t) / mag;
+                        hal_draw_pixel(tx, ty, RGB565(r, g, b));
+                    }
+                }
+            }
+        }
+
         hal_draw_pixel(px,     py,     g_game_cfg.ui.player_missile_main_color);
         hal_draw_pixel(px + 1, py,     g_game_cfg.ui.player_missile_shadow_color);
         hal_draw_pixel(px,     py + 1, g_game_cfg.ui.player_missile_shadow_color);

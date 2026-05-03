@@ -26,6 +26,14 @@ typedef struct {
     uint16_t tip_color;
     int fade_dist;
     int enemy_render_min_y;
+
+    int player_len;
+    uint8_t player_lead_r;
+    uint8_t player_lead_g;
+    uint8_t player_lead_b;
+    uint8_t player_tail_r;
+    uint8_t player_tail_g;
+    uint8_t player_tail_b;
 } TrailConfig;
 
 typedef struct {
