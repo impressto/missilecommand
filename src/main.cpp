@@ -52,6 +52,37 @@ enum MenuItem {
 };
 
 static BleMouse ble_mouse("MissileCommand Mouse", "impressto", 100);
+static int mouse_joy_center_x = 2048;
+static int mouse_joy_center_y = 2048;
+static int mouse_joy_calibrated = 0;
+
+static int read_axis_avg_local(int pin, int samples) {
+    if (pin < 0) return -1;
+    long sum = 0;
+    for (int i = 0; i < samples; i++) {
+        sum += analogRead(pin);
+    }
+    return (int)(sum / samples);
+}
+
+static void calibrate_mouse_joystick_center() {
+    if (JOY_X_PIN < 0 || JOY_Y_PIN < 0) {
+        mouse_joy_calibrated = 0;
+        return;
+    }
+
+    long sx = 0;
+    long sy = 0;
+    const int samples = 24;
+    for (int i = 0; i < samples; i++) {
+        sx += analogRead(JOY_X_PIN);
+        sy += analogRead(JOY_Y_PIN);
+        delay(2);
+    }
+    mouse_joy_center_x = (int)(sx / samples);
+    mouse_joy_center_y = (int)(sy / samples);
+    mouse_joy_calibrated = 1;
+}
 
 static int text_pixel_width(const char *str) {
     const int len = (int)strlen(str);
@@ -134,6 +165,7 @@ static void update_start_menu(uint32_t now) {
             last_mouse_report_ms = 0;
             prev_mouse_cursor_x = hal_read_cursor_x();
             prev_mouse_cursor_y = hal_read_cursor_y();
+            calibrate_mouse_joystick_center();
         } else {
             game_set_demo_mode(menu_selected == MENU_DEMO_MODE);
             game_init();
@@ -182,17 +214,32 @@ static void update_mouse_mode(uint32_t now) {
     if (connected) {
         const bool reports_ready = (now - ble_connected_since_ms) >= 900;
         const bool report_slot_ready = (now - last_mouse_report_ms) >= 20;
-        const int delta_deadband = 1;
-        int dx = cx - prev_mouse_cursor_x;
-        int dy = cy - prev_mouse_cursor_y;
-        prev_mouse_cursor_x = cx;
-        prev_mouse_cursor_y = cy;
+        int dx = 0;
+        int dy = 0;
 
-        if (dx > -delta_deadband && dx < delta_deadband) dx = 0;
-        if (dy > -delta_deadband && dy < delta_deadband) dy = 0;
+        if (mouse_joy_calibrated && JOY_X_PIN >= 0 && JOY_Y_PIN >= 0) {
+            const int raw_x = read_axis_avg_local(JOY_X_PIN, 4);
+            const int raw_y = read_axis_avg_local(JOY_Y_PIN, 4);
+            int off_x = raw_x - mouse_joy_center_x;
+            int off_y = raw_y - mouse_joy_center_y;
+            const int dead = 170;
 
-        dx *= 2;
-        dy *= 2;
+            if (off_x > -dead && off_x < dead) off_x = 0;
+            if (off_y > -dead && off_y < dead) off_y = 0;
+
+            dx = off_x / 160;
+            dy = off_y / 160;
+        } else {
+            const int delta_deadband = 1;
+            dx = cx - prev_mouse_cursor_x;
+            dy = cy - prev_mouse_cursor_y;
+            prev_mouse_cursor_x = cx;
+            prev_mouse_cursor_y = cy;
+            if (dx > -delta_deadband && dx < delta_deadband) dx = 0;
+            if (dy > -delta_deadband && dy < delta_deadband) dy = 0;
+            dx *= 2;
+            dy *= 2;
+        }
 
         if (dx > 12) dx = 12;
         if (dx < -12) dx = -12;
@@ -299,6 +346,7 @@ void setup() {
     Serial.println("[BOOT] Serial ready at 115200");
     hal_init();
     ble_mouse.begin();
+    calibrate_mouse_joystick_center();
     ble_prev_connected = 0;
     last_ble_adv_kick_ms = 0;
     ble_connected_since_ms = 0;
