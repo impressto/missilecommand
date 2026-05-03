@@ -7,6 +7,8 @@
 
 #include <Arduino.h>
 #include <string.h>
+#include <BleMouse.h>
+#include <BLEDevice.h>
 #include "hal.h"              /* local to esp32/src */
 #include "missile_command.h"
 
@@ -19,16 +21,37 @@
 
 static uint32_t last_ticks = 0;
 static uint8_t prev_menu_buttons = 0;
+static uint8_t prev_mouse_buttons = 0;
 static int menu_fire_armed = 0;
 static uint32_t menu_enter_ms = 0;
+static uint32_t menu_nav_cooldown_ms = 0;
+static int prev_menu_cursor_y = SCREEN_H / 2;
+static uint32_t mouse_exit_hold_ms = 0;
+static uint32_t last_mouse_status_ms = 0;
+static uint32_t last_ble_adv_kick_ms = 0;
+static int ble_prev_connected = 0;
+static uint32_t ble_connected_since_ms = 0;
+static uint32_t last_mouse_report_ms = 0;
+static int prev_mouse_cursor_x = SCREEN_W / 2;
+static int prev_mouse_cursor_y = SCREEN_H / 2;
 
 enum AppMode {
     APP_MENU = 0,
     APP_GAME = 1,
+    APP_MOUSE = 2,
 };
 
 static AppMode app_mode = APP_MENU;
-static int menu_demo_selected = 0;
+static int menu_selected = 0;
+
+enum MenuItem {
+    MENU_PLAY_NOW = 0,
+    MENU_DEMO_MODE = 1,
+    MENU_MOUSE_MODE = 2,
+    MENU_ITEM_COUNT = 3,
+};
+
+static BleMouse ble_mouse("MissileCommand Mouse", "impressto", 100);
 
 static int text_pixel_width(const char *str) {
     const int len = (int)strlen(str);
@@ -46,12 +69,14 @@ static void draw_start_menu() {
     draw_text_centered(34, "MISSILE COMMAND", COL_CYAN, COL_BLACK);
     draw_text_centered(56, "ESP32 START MENU", COL_WHITE, COL_BLACK);
 
-    const uint16_t play_col = menu_demo_selected ? COL_WHITE : COL_GREEN;
-    const uint16_t demo_col = menu_demo_selected ? COL_YELLOW : COL_WHITE;
-    draw_text_centered(108, menu_demo_selected ? "  PLAY NOW" : "> PLAY NOW", play_col, COL_BLACK);
-    draw_text_centered(124, menu_demo_selected ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
+    const uint16_t play_col = (menu_selected == MENU_PLAY_NOW) ? COL_GREEN : COL_WHITE;
+    const uint16_t demo_col = (menu_selected == MENU_DEMO_MODE) ? COL_YELLOW : COL_WHITE;
+    const uint16_t mouse_col = (menu_selected == MENU_MOUSE_MODE) ? COL_CYAN : COL_WHITE;
+    draw_text_centered(104, (menu_selected == MENU_PLAY_NOW) ? "> PLAY NOW" : "  PLAY NOW", play_col, COL_BLACK);
+    draw_text_centered(120, (menu_selected == MENU_DEMO_MODE) ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
+    draw_text_centered(136, (menu_selected == MENU_MOUSE_MODE) ? "> MOUSE MODE" : "  MOUSE MODE", mouse_col, COL_BLACK);
 
-    draw_text_centered(174, "Move joystick left/right or up/down", COL_GRAY, COL_BLACK);
+    draw_text_centered(174, "Move joystick up/down to select", COL_GRAY, COL_BLACK);
     if (menu_fire_armed) {
         draw_text_centered(188, "Press fire button to start", COL_GRAY, COL_BLACK);
     } else {
@@ -62,30 +87,35 @@ static void draw_start_menu() {
 
 static void update_start_menu(uint32_t now) {
     const uint8_t buttons = hal_read_input();
-    const int cx = hal_read_cursor_x();
+    (void)hal_read_cursor_x();
     const int cy = hal_read_cursor_y();
-    const int center_x = SCREEN_W / 2;
-    const int center_y = SCREEN_H / 2;
-    const int menu_axis_deadband = 16;
+    const uint32_t menu_nav_repeat_ms = 170;
+    const int menu_nav_delta_px = 3;
 
-    if (cx < center_x - menu_axis_deadband) {
-        menu_demo_selected = 0;
-    } else if (cx > center_x + menu_axis_deadband) {
-        menu_demo_selected = 1;
-    }
+    int nav_step = 0;
+    int delta_y = cy - prev_menu_cursor_y;
 
-    if (cy < center_y - menu_axis_deadband) {
-        menu_demo_selected = 0;
-    } else if (cy > center_y + menu_axis_deadband) {
-        menu_demo_selected = 1;
+    if (delta_y <= -menu_nav_delta_px) {
+        nav_step = -1;
+    } else if (delta_y >= menu_nav_delta_px) {
+        nav_step = 1;
     }
 
     if ((buttons & BTN_LEFT) && !(prev_menu_buttons & BTN_LEFT)) {
-        menu_demo_selected = 0;
+        nav_step = -1;
     }
     if ((buttons & BTN_RIGHT) && !(prev_menu_buttons & BTN_RIGHT)) {
-        menu_demo_selected = 1;
+        nav_step = 1;
     }
+
+    if (nav_step != 0 && (now - menu_nav_cooldown_ms) >= menu_nav_repeat_ms) {
+        menu_selected += nav_step;
+        if (menu_selected < 0) menu_selected = 0;
+        if (menu_selected >= MENU_ITEM_COUNT) menu_selected = MENU_ITEM_COUNT - 1;
+        menu_nav_cooldown_ms = now;
+    }
+
+    prev_menu_cursor_y = cy;
 
     if (!menu_fire_armed) {
         if ((buttons & BTN_FIRE) == 0 && (now - menu_enter_ms) > 300) {
@@ -94,14 +124,124 @@ static void update_start_menu(uint32_t now) {
     }
 
     if (menu_fire_armed && (buttons & BTN_FIRE) && !(prev_menu_buttons & BTN_FIRE)) {
-        game_set_demo_mode(menu_demo_selected);
-        game_init();
-        last_ticks = hal_ticks_ms();
-        app_mode = APP_GAME;
+        if (menu_selected == MENU_MOUSE_MODE) {
+            app_mode = APP_MOUSE;
+            prev_mouse_buttons = 0;
+            mouse_exit_hold_ms = 0;
+            last_mouse_status_ms = 0;
+            last_ble_adv_kick_ms = 0;
+            ble_connected_since_ms = 0;
+            last_mouse_report_ms = 0;
+            prev_mouse_cursor_x = hal_read_cursor_x();
+            prev_mouse_cursor_y = hal_read_cursor_y();
+        } else {
+            game_set_demo_mode(menu_selected == MENU_DEMO_MODE);
+            game_init();
+            last_ticks = hal_ticks_ms();
+            app_mode = APP_GAME;
+        }
     }
 
     prev_menu_buttons = buttons;
     draw_start_menu();
+}
+
+static void draw_mouse_mode_screen(bool connected) {
+    hal_clear(COL_BLACK);
+    hal_draw_rect(14, 18, SCREEN_W - 28, 196, COL_BLACK);
+    draw_text_centered(34, "MISSILE COMMAND", COL_CYAN, COL_BLACK);
+    draw_text_centered(56, "MOUSE MODE", COL_WHITE, COL_BLACK);
+    draw_text_centered(96, connected ? "BLE STATUS: CONNECTED" : "BLE STATUS: WAITING", connected ? COL_GREEN : COL_YELLOW, COL_BLACK);
+    draw_text_centered(120, "Joystick = mouse move", COL_WHITE, COL_BLACK);
+    draw_text_centered(136, "FIRE = left click", COL_WHITE, COL_BLACK);
+    draw_text_centered(152, "LEFT button = right click", COL_WHITE, COL_BLACK);
+    draw_text_centered(176, "Hold FIRE+LEFT+DOWN for 2.5s to exit", COL_GRAY, COL_BLACK);
+    hal_present();
+}
+
+static void update_mouse_mode(uint32_t now) {
+    const uint8_t buttons = hal_read_input();
+    const int cx = hal_read_cursor_x();
+    const int cy = hal_read_cursor_y();
+    const bool connected = ble_mouse.isConnected();
+
+    if (!connected && (now - last_ble_adv_kick_ms) >= 2000) {
+        BLEDevice::startAdvertising();
+        last_ble_adv_kick_ms = now;
+    }
+
+    if ((connected ? 1 : 0) != ble_prev_connected) {
+        Serial.printf("[BLE] mouse %s\n", connected ? "connected" : "disconnected");
+        if (connected) {
+            ble_connected_since_ms = now;
+            last_mouse_report_ms = 0;
+        }
+        ble_prev_connected = connected ? 1 : 0;
+    }
+
+    if (connected) {
+        const bool reports_ready = (now - ble_connected_since_ms) >= 900;
+        const bool report_slot_ready = (now - last_mouse_report_ms) >= 20;
+        const int delta_deadband = 1;
+        int dx = cx - prev_mouse_cursor_x;
+        int dy = cy - prev_mouse_cursor_y;
+        prev_mouse_cursor_x = cx;
+        prev_mouse_cursor_y = cy;
+
+        if (dx > -delta_deadband && dx < delta_deadband) dx = 0;
+        if (dy > -delta_deadband && dy < delta_deadband) dy = 0;
+
+        dx *= 2;
+        dy *= 2;
+
+        if (dx > 12) dx = 12;
+        if (dx < -12) dx = -12;
+        if (dy > 12) dy = 12;
+        if (dy < -12) dy = -12;
+
+        if (reports_ready && report_slot_ready && (dx != 0 || dy != 0)) {
+            ble_mouse.move(dx, dy, 0, 0);
+            last_mouse_report_ms = now;
+        }
+
+        if (reports_ready && (buttons & BTN_FIRE) && !(prev_mouse_buttons & BTN_FIRE)) {
+            ble_mouse.click(MOUSE_LEFT);
+            last_mouse_report_ms = now;
+        }
+
+        if (reports_ready && (buttons & BTN_LEFT) && !(prev_mouse_buttons & BTN_LEFT)) {
+            ble_mouse.click(MOUSE_RIGHT);
+            last_mouse_report_ms = now;
+        }
+    }
+
+    if ((buttons & BTN_FIRE) && (buttons & BTN_LEFT) && cy > (SCREEN_H - 8)) {
+        if (mouse_exit_hold_ms == 0) {
+            mouse_exit_hold_ms = now;
+        } else if ((now - mouse_exit_hold_ms) >= 2500) {
+            if (connected) {
+                ble_mouse.release(MOUSE_LEFT);
+                ble_mouse.release(MOUSE_RIGHT);
+            }
+            app_mode = APP_MENU;
+            menu_enter_ms = now;
+            menu_fire_armed = 0;
+            menu_nav_cooldown_ms = now;
+            prev_menu_cursor_y = hal_read_cursor_y();
+            prev_menu_buttons = 0;
+            prev_mouse_buttons = 0;
+            return;
+        }
+    } else {
+        mouse_exit_hold_ms = 0;
+    }
+
+    if ((now - last_mouse_status_ms) >= 100) {
+        draw_mouse_mode_screen(connected);
+        last_mouse_status_ms = now;
+    }
+
+    prev_mouse_buttons = buttons;
 }
 #ifdef JOYSTICK_TEST
 static uint32_t last_joy_log_ms = 0;
@@ -158,8 +298,17 @@ void setup() {
     }
     Serial.println("[BOOT] Serial ready at 115200");
     hal_init();
+    ble_mouse.begin();
+    ble_prev_connected = 0;
+    last_ble_adv_kick_ms = 0;
+    ble_connected_since_ms = 0;
+    last_mouse_report_ms = 0;
+    prev_mouse_cursor_x = hal_read_cursor_x();
+    prev_mouse_cursor_y = hal_read_cursor_y();
     last_ticks = hal_ticks_ms();
     menu_enter_ms = last_ticks;
+    menu_nav_cooldown_ms = last_ticks;
+    prev_menu_cursor_y = hal_read_cursor_y();
     menu_fire_armed = 0;
 #ifdef JOYSTICK_TEST
     Serial.println("[JOYSTICK_TEST] enabled: calibration logging active");
@@ -180,6 +329,11 @@ void loop() {
         return;
     }
 
+    if (app_mode == APP_MOUSE) {
+        update_mouse_mode(now);
+        return;
+    }
+
     uint32_t delta = now - last_ticks;
 
     /* In dual-core mode hal_present() is naturally paced by the SPI blit;   */
@@ -197,6 +351,8 @@ void loop() {
         app_mode = APP_MENU;
         prev_menu_buttons = 0;
         menu_enter_ms = hal_ticks_ms();
+        menu_nav_cooldown_ms = menu_enter_ms;
+        prev_menu_cursor_y = hal_read_cursor_y();
         menu_fire_armed = 0;
     }
 }
