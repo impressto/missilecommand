@@ -252,7 +252,7 @@
 #ifdef WAV_MASTER_GAIN
 #define CFG_WAV_MASTER_GAIN WAV_MASTER_GAIN
 #else
-#define CFG_WAV_MASTER_GAIN 160
+#define CFG_WAV_MASTER_GAIN 100
 #endif
 #endif
 
