@@ -4,3 +4,4 @@
 .vscode/launch.json
 .vscode/ipch
 wasm/wasm_host/build/*
+sub-projects/MAX98357A-test/*

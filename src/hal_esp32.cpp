@@ -18,6 +18,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+#include <driver/i2s.h>
+#include <SPIFFS.h>
 
 #include "game_config.h"
 #include "background-1.h"
@@ -74,6 +76,24 @@
 #endif
 #ifndef PIEZO_LEDC_CHANNEL
 #define PIEZO_LEDC_CHANNEL 7
+#endif
+
+/* ── I2S / MAX98357A pin defaults ────────────────────────────────────────── */
+/* Override in platformio.ini build_flags.  Set DOUT to a valid GPIO to      */
+/* activate I2S audio; leave at -1 to fall back to the piezo buzzer.        */
+#ifndef I2S_BCLK_PIN
+#define I2S_BCLK_PIN  -1
+#endif
+#ifndef I2S_LRCLK_PIN
+#define I2S_LRCLK_PIN -1
+#endif
+#ifndef I2S_DOUT_PIN
+#define I2S_DOUT_PIN  -1
+#endif
+/* AMP_SD controls the MAX98357A SD (shutdown) pin.  Optional: tie SD high   */
+/* on the board if you don't need software mute, and leave this as -1.      */
+#ifndef AMP_SD_PIN
+#define AMP_SD_PIN    -1
 #endif
 
 /* Per-sound enable flags — set to 0 in platformio.ini build_flags to silence. */
@@ -174,6 +194,13 @@ static bool use_dual_core  = false;
 static QueueHandle_t sound_queue = nullptr;
 static bool use_piezo = false;
 
+/* ── I2S / MAX98357A audio state ─────────────────────────────────────────── */
+static const i2s_port_t   kI2SPort          = I2S_NUM_0;
+static const uint32_t     kI2SSampleRate     = 44100;
+static const size_t       kI2SFramesPerChunk = 256;
+static QueueHandle_t      i2s_sound_queue    = nullptr;
+static bool               use_i2s_audio      = false;
+
 static void piezo_silence(void) {
     if (!use_piezo) {
         return;
@@ -254,6 +281,153 @@ static void piezo_task(void *) {
         if (xQueueReceive(sound_queue, &sound_id, portMAX_DELAY) == pdTRUE) {
             piezo_play_pattern(sound_id);
         }
+    }
+}
+
+/* ── I2S / MAX98357A WAV player ──────────────────────────────────────────── */
+
+static const char* i2s_sound_filename(int sound_id) {
+    switch (sound_id) {
+        case SND_LAUNCH:        return "/missile-2.wav";
+        case SND_PLAYER_BURST:  return "/swoop-up.wav";
+        case SND_INTERCEPT:     return "/incoming-missile.wav";
+        case SND_IMPACT:        return "/explode.wav";
+        case SND_ALERT:         return nullptr;  /* Disabled */
+        case SND_WAVE_COMPLETE: return "/roll-up.wav";
+        case SND_GAME_OVER:     return "/finale.wav";
+        default:                return nullptr;
+    }
+}
+
+struct I2SWavHeader {
+    uint16_t num_channels;
+    uint32_t sample_rate;
+    uint16_t bits_per_sample;
+    uint32_t data_size;
+};
+
+static bool i2s_parse_wav_header(File& file, I2SWavHeader& hdr) {
+    file.seek(0);
+    char tag[4];
+    uint32_t tmp;
+
+    /* RIFF tag */
+    if (file.read((uint8_t*)tag, 4) != 4) return false;
+    if (tag[0]!='R' || tag[1]!='I' || tag[2]!='F' || tag[3]!='F') return false;
+    file.read((uint8_t*)&tmp, 4); /* RIFF chunk size */
+
+    /* WAVE tag */
+    if (file.read((uint8_t*)tag, 4) != 4) return false;
+    if (tag[0]!='W' || tag[1]!='A' || tag[2]!='V' || tag[3]!='E') return false;
+
+    /* Scan for fmt chunk */
+    bool found_fmt = false;
+    while (!found_fmt) {
+        if (file.read((uint8_t*)tag, 4) != 4) return false;
+        uint32_t chunk_size;
+        if (file.read((uint8_t*)&chunk_size, 4) != 4) return false;
+        if (tag[0]=='f' && tag[1]=='m' && tag[2]=='t' && tag[3]==' ') {
+            uint8_t fmt[16];
+            uint32_t to_read = (chunk_size < 16u) ? chunk_size : 16u;
+            if (file.read(fmt, to_read) != (int)to_read) return false;
+            if (chunk_size > 16u) file.seek(file.position() + chunk_size - 16u);
+            hdr.num_channels    = *(uint16_t*)(fmt + 2);
+            hdr.sample_rate     = *(uint32_t*)(fmt + 4);
+            hdr.bits_per_sample = *(uint16_t*)(fmt + 14);
+            found_fmt = true;
+        } else {
+            file.seek(file.position() + chunk_size);
+        }
+    }
+
+    /* Scan for data chunk */
+    for (;;) {
+        if (file.read((uint8_t*)tag, 4) != 4) return false;
+        uint32_t chunk_size;
+        if (file.read((uint8_t*)&chunk_size, 4) != 4) return false;
+        if (tag[0]=='d' && tag[1]=='a' && tag[2]=='t' && tag[3]=='a') {
+            hdr.data_size = chunk_size;
+            return true;
+        }
+        file.seek(file.position() + chunk_size);
+    }
+}
+
+static void i2s_stream_wav(File& file, const I2SWavHeader& hdr) {
+    /* Reconfigure I2S clock/channels for this file if needed */
+    const i2s_channel_t ch = (hdr.num_channels == 1) ? I2S_CHANNEL_MONO : I2S_CHANNEL_STEREO;
+    if (hdr.sample_rate != kI2SSampleRate || hdr.num_channels != 2) {
+        i2s_set_clk(kI2SPort, hdr.sample_rate, I2S_BITS_PER_SAMPLE_16BIT, ch);
+    }
+
+    /* Buffer: sized for one chunk of stereo 16-bit frames */
+    static int16_t buf[kI2SFramesPerChunk * 2];
+    uint32_t remaining = hdr.data_size;
+
+    while (remaining > 0) {
+        /* Check if a new sound has arrived — interrupt current playback */
+        int dummy;
+        if (xQueuePeek(i2s_sound_queue, &dummy, 0) == pdTRUE) {
+            break; /* New sound waiting, stop current playback */
+        }
+
+        /* For mono we only fill half the buffer so we have room to expand */
+        const size_t max_read = (hdr.num_channels == 1)
+                                ? sizeof(buf) / 2
+                                : sizeof(buf);
+        const size_t to_read  = (remaining < (uint32_t)max_read)
+                                ? (size_t)remaining
+                                : max_read;
+        const int n_read = file.read((uint8_t*)buf, to_read);
+        if (n_read <= 0) break;
+        remaining -= (uint32_t)n_read;
+
+        size_t written;
+        if (hdr.num_channels == 1) {
+            /* Expand mono → stereo in-place (iterate backward to avoid clobber) */
+            const int n_samples = n_read / 2;
+            for (int i = n_samples - 1; i >= 0; i--) {
+                buf[i * 2 + 1] = buf[i];
+                buf[i * 2]     = buf[i];
+            }
+            i2s_write(kI2SPort, buf, (size_t)(n_read * 2), &written, portMAX_DELAY);
+        } else {
+            i2s_write(kI2SPort, buf, (size_t)n_read, &written, portMAX_DELAY);
+        }
+    }
+
+    /* Restore default sample rate if we changed it */
+    if (hdr.sample_rate != kI2SSampleRate) {
+        i2s_set_clk(kI2SPort, kI2SSampleRate, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_STEREO);
+    }
+}
+
+static void i2s_audio_task(void*) {
+    int sound_id;
+    for (;;) {
+        if (xQueueReceive(i2s_sound_queue, &sound_id, portMAX_DELAY) != pdTRUE) continue;
+        
+        /* Flush any additional queued sounds to play only the most recent */
+        int newer_sound;
+        while (xQueueReceive(i2s_sound_queue, &newer_sound, 0) == pdTRUE) {
+            sound_id = newer_sound;
+        }
+        
+        const char* fname = i2s_sound_filename(sound_id);
+        if (!fname) continue;
+        File f = SPIFFS.open(fname, FILE_READ);
+        if (!f) {
+            Serial.printf("[I2S] WAV not found: %s\n", fname);
+            continue;
+        }
+        I2SWavHeader hdr;
+        if (!i2s_parse_wav_header(f, hdr)) {
+            Serial.printf("[I2S] Bad WAV header: %s\n", fname);
+            f.close();
+            continue;
+        }
+        i2s_stream_wav(f, hdr);
+        f.close();
     }
 }
 
@@ -500,6 +674,10 @@ void hal_init(void) {
         digitalWrite(TFT_BL, HIGH);
     }
 
+    /* Disable onboard RGB LED (GPIO48 on ESP32-S3 DevKitC-1) */
+    pinMode(48, OUTPUT);
+    digitalWrite(48, LOW);
+
     configure_input_pin(FIRE_PIN);
     configure_input_pin(FIRE_PIN_2);
     configure_input_pin(LEFT_PIN);
@@ -516,6 +694,86 @@ void hal_init(void) {
             Serial.printf("[HAL] piezo on GPIO %d\n", PIEZO_PIN);
         } else {
             Serial.println("[HAL] piezo queue alloc failed");
+        }
+    }
+
+    /* ── I2S / MAX98357A audio init ──────────────────────────────────────── */
+    /* Only activated when I2S_DOUT_PIN is wired.  Takes priority over piezo. */
+    if (I2S_DOUT_PIN >= 0) {
+        if (!SPIFFS.begin(true)) {
+            Serial.println("[HAL] SPIFFS mount failed — I2S audio disabled");
+        } else {
+            Serial.println("[HAL] SPIFFS mounted");
+            if (AMP_SD_PIN >= 0) {
+                pinMode(AMP_SD_PIN, OUTPUT);
+                digitalWrite(AMP_SD_PIN, HIGH); /* un-mute amp */
+                Serial.printf("[HAL] AMP_SD (GPIO%d) set HIGH (enabled)\n", AMP_SD_PIN);
+            } else {
+                Serial.println("[HAL] AMP_SD pin not configured (tie SD high on board)");
+            }
+
+            const i2s_config_t i2s_cfg = {
+                .mode                 = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX),
+                .sample_rate          = kI2SSampleRate,
+                .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
+                .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
+                .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+                .intr_alloc_flags     = 0,
+                .dma_buf_count        = 8,
+                .dma_buf_len          = 256,
+                .use_apll             = false,
+                .tx_desc_auto_clear   = true,
+                .fixed_mclk           = 0,
+            };
+            const i2s_pin_config_t i2s_pins = {
+                .bck_io_num   = I2S_BCLK_PIN,
+                .ws_io_num    = I2S_LRCLK_PIN,
+                .data_out_num = I2S_DOUT_PIN,
+                .data_in_num  = I2S_PIN_NO_CHANGE,
+            };
+            i2s_driver_install(kI2SPort, &i2s_cfg, 0, nullptr);
+            i2s_set_pin(kI2SPort, &i2s_pins);
+            i2s_set_clk(kI2SPort, kI2SSampleRate,
+                        I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_STEREO);
+
+            i2s_sound_queue = xQueueCreate(4, sizeof(int));
+            if (i2s_sound_queue != nullptr) {
+                xTaskCreatePinnedToCore(i2s_audio_task, "i2s_audio",
+                                        4096, nullptr, 1, nullptr, 1);
+                use_i2s_audio = true;
+                Serial.printf("[HAL] I2S audio: BCLK=%d LRCLK=%d DOUT=%d AMP_SD=%d\n",
+                              I2S_BCLK_PIN, I2S_LRCLK_PIN, I2S_DOUT_PIN, AMP_SD_PIN);
+                
+                /* Give I2S hardware time to stabilize */
+                delay(100);
+                
+                /* Startup test beep: 1000 Hz tone for 200ms at 50% volume */
+                Serial.println("[HAL] Playing startup test beep (1000 Hz, 200ms)...");
+                const float test_tone_hz = 1000.0f;
+                const uint32_t test_duration_ms = 200;
+                const size_t test_samples = (kI2SSampleRate * test_duration_ms) / 1000;
+                int16_t test_buf[512];
+                size_t samples_sent = 0;
+                float phase = 0.0f;
+                const float phase_step = (2.0f * 3.14159f * test_tone_hz) / (float)kI2SSampleRate;
+                
+                while (samples_sent < test_samples) {
+                    const size_t chunk = (test_samples - samples_sent > 256) ? 256 : (test_samples - samples_sent);
+                    for (size_t i = 0; i < chunk; i++) {
+                        const int16_t val = (int16_t)(sinf(phase) * 16384.0f); /* ~50% volume */
+                        test_buf[i * 2] = val;     /* left */
+                        test_buf[i * 2 + 1] = val; /* right */
+                        phase += phase_step;
+                        if (phase >= 2.0f * 3.14159f) phase -= 2.0f * 3.14159f;
+                    }
+                    size_t written;
+                    i2s_write(kI2SPort, test_buf, chunk * 4, &written, portMAX_DELAY);
+                    samples_sent += chunk;
+                }
+                Serial.printf("[HAL] Test beep complete (%u samples sent)\n", (unsigned)samples_sent);
+            } else {
+                Serial.println("[HAL] I2S queue alloc failed");
+            }
         }
     }
 
@@ -761,6 +1019,12 @@ void hal_fade_to_black(uint8_t amount) {
 }
 
 void hal_play_sound(int sound_id) {
+    /* I2S audio (MAX98357A) takes priority when wired */
+    if (use_i2s_audio && i2s_sound_queue != nullptr) {
+        xQueueSend(i2s_sound_queue, &sound_id, 0);
+        return;
+    }
+    /* Fallback: piezo buzzer */
     if (!use_piezo || sound_queue == nullptr) {
         (void)sound_id;
         return;

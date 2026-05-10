@@ -54,6 +54,24 @@ Example mapping for a common module labeled `GND`, `+5V`, `VRx`, `VRy`, `SW`:
 | VRy | GPIO5 | Y-axis analog input (`JOY_Y_PIN`) |
 | SW | GPIO7 | Optional push switch, active-low (`FIRE_PIN`) |
 
+## MAX98357A I2S Audio Amplifier (optional)
+
+To enable WAV audio playback of game sounds:
+
+| MAX98357A Pin | ESP32-S3 Pin | Signal | Notes |
+|---|---:|---|---|
+| VIN | 5V | Power | 5V gives more output power than 3.3V |
+| GND | GND | Ground | Common ground with ESP32 |
+| BCLK | GPIO47 | I2S bit clock | (`I2S_BCLK_PIN`) |
+| LRC / WS | GPIO45 | I2S left/right clock | (`I2S_LRCLK_PIN`) |
+| DIN | GPIO38 | I2S data output | (`I2S_DOUT_PIN`) — GPIO48 is RGB LED |
+| SD | GPIO21 | Shutdown/mute | Optional; tie SD high on board to omit (`AMP_SD_PIN`) |
+| GAIN | — | Gain select | Leave at module default (or configure per datasheet) |
+| SPK+ | Speaker+ | — | Connect to speaker positive terminal |
+| SPK- | Speaker- | — | Connect to speaker negative terminal |
+
+WAV files are stored in SPIFFS. Upload them with `pio run -t uploadfs` (see `data/README.md`)
+
 ## Wiring Diagram
 
 ```text
@@ -68,9 +86,6 @@ GPIO9  (DC)   ------------------------> DC / A0
 GPIO13 (RST)  ------------------------> RST / RES
 GPIO8  (BL)   ------------------------> BL / LED
 
-(optional)
-NC    --------------------------------> MISO / SDO
-
 
 ESP32-S3 DevKitC-1                     XY Joystick Module (5-pin)
 --------------------                   --------------------------
@@ -79,6 +94,19 @@ GND   --------------------------------> GND
 GPIO4 (ADC, X) -----------------------> VRx
 GPIO5 (ADC, Y) -----------------------> VRy
 GPIO7 (SW)    ------------------------> SW
+
+
+ESP32-S3 DevKitC-1                     MAX98357A Amplifier (optional audio)
+--------------------                   ------------------------------------
+5V    --------------------------------> VIN
+GND   --------------------------------> GND
+GPIO47 (I2S_BCLK) --------------------> BCLK
+GPIO45 (I2S_LRCLK) -------------------> LRC / WS
+GPIO38 (I2S_DOUT) --------------------> DIN
+GPIO21 (AMP_SD) ----------------------> SD (optional mute control)
+
+MAX98357A SPK+ -----------------------> Speaker +
+MAX98357A SPK- -----------------------> Speaker -
 ```
 
 ## Optional Input Wiring
@@ -113,3 +141,34 @@ python3 -m pip install --user platformio
 ```
 
 Then add `~/.local/bin` to your `PATH` if needed.
+
+## Upload
+
+### 1. Upload Firmware
+
+Flash the compiled firmware to the ESP32-S3:
+
+```sh
+~/.platformio/penv/bin/pio run -t upload
+```
+
+Hold the **BOOT** button while tapping **RESET** if the upload fails to connect.
+
+### 2. Upload WAV Files to SPIFFS
+
+The game sounds are stored as WAV files in the ESP32's SPIFFS filesystem partition (7 MB). After placing WAV files in the `data/` folder, upload them:
+
+```sh
+~/.platformio/penv/bin/pio run -t uploadfs
+```
+
+**Required WAV files** (see `data/README.md` for format details):
+- `alert.wav` ~/.platformio/penv/bin/pio run -t uploadfs— Enemy missile spawned
+- `missile-2.wav` — Player missile fired
+- `swoop-up.wav` — Player missile bursts
+- `incoming-missile.wav` — Enemy missile destroyed
+- `explode.wav` — Enemy hits city/ground
+- `roll-up.wav` — Wave cleared
+- `finale.wav` — Game over
+
+The filesystem upload is **independent** of firmware upload — you can swap audio files without recompiling code by running only `uploadfs`.
