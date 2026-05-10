@@ -248,6 +248,14 @@
 #endif
 #endif
 
+#ifndef CFG_WAV_MASTER_GAIN
+#ifdef WAV_MASTER_GAIN
+#define CFG_WAV_MASTER_GAIN WAV_MASTER_GAIN
+#else
+#define CFG_WAV_MASTER_GAIN 160
+#endif
+#endif
+
 const GameConfig g_game_cfg = {
     .explosion = {
         .impact_radius = CFG_EXPL_IMPACT_RADIUS,
@@ -306,5 +314,8 @@ const GameConfig g_game_cfg = {
         .wave_complete_next_color = COL_GREEN,
         .game_over_title_color = COL_RED,
         .game_over_subtitle_color = COL_WHITE,
+    },
+    .audio = {
+        .wav_master_gain = CFG_WAV_MASTER_GAIN,
     },
 };

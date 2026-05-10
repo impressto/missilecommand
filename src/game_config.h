@@ -77,10 +77,15 @@ typedef struct {
 } UiConfig;
 
 typedef struct {
+    uint8_t wav_master_gain; /* 0-255 */
+} AudioConfig;
+
+typedef struct {
     ExplosionConfig explosion;
     TrailConfig trail;
     AmmoConfig ammo;
     UiConfig ui;
+    AudioConfig audio;
 } GameConfig;
 
 extern const GameConfig g_game_cfg;

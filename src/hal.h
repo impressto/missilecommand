@@ -186,7 +186,7 @@ void hal_delay_ms(uint32_t ms);
 #define SND_LAUNCH        0   /* player missile fired           */
 #define SND_PLAYER_BURST  1   /* player missile reaches target  */
 #define SND_INTERCEPT     2   /* enemy missile destroyed        */
-#define SND_IMPACT        3   /* enemy missile hits ground/city */
+#define SND_IMPACT        3   /* enemy missile reaches ground line */
 #define SND_ALERT         4   /* enemy missile spawned          */
 #define SND_WAVE_COMPLETE 5   /* wave clears, next wave starts  */
 #define SND_GAME_OVER     6   /* all cities destroyed           */

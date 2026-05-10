@@ -72,6 +72,8 @@ To enable WAV audio playback of game sounds:
 
 WAV files are stored in SPIFFS. Upload them with `pio run -t uploadfs` (see `data/README.md`)
 
+WAV playback volume can be adjusted at compile time with `CFG_WAV_MASTER_GAIN` (range `0-255`) in `platformio.ini` build flags.
+
 ## Wiring Diagram
 
 ```text
@@ -164,10 +166,10 @@ The game sounds are stored as WAV files in the ESP32's SPIFFS filesystem partiti
 
 **Required WAV files** (see `data/README.md` for format details):
 - `alert.wav` ~/.platformio/penv/bin/pio run -t uploadfs— Enemy missile spawned
-- `missile-2.wav` — Player missile fired
+- `outgoing-missile.wav` — Player missile fired
 - `swoop-up.wav` — Player missile bursts
 - `incoming-missile.wav` — Enemy missile destroyed
-- `explode.wav` — Enemy hits city/ground
+- `explode.wav` — Enemy reaches the ground line (city/battery/ground)
 - `roll-up.wav` — Wave cleared
 - `finale.wav` — Game over
 

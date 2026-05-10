@@ -19,6 +19,7 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <driver/i2s.h>
+#include <esp_heap_caps.h>
 #include <SPIFFS.h>
 
 #include "game_config.h"
@@ -198,8 +199,16 @@ static bool use_piezo = false;
 static const i2s_port_t   kI2SPort          = I2S_NUM_0;
 static const uint32_t     kI2SSampleRate     = 44100;
 static const size_t       kI2SFramesPerChunk = 256;
+static const char*        kLaunchWavFilename = "/outgoing-missile.wav";
+static const char*        kStartupWavFilename = "/startup.wav";
+static const int          kStartupSoundId     = 100;
+static const int          kMaxMixVoices      = 3;
 static QueueHandle_t      i2s_sound_queue    = nullptr;
 static bool               use_i2s_audio      = false;
+
+#ifndef CFG_STARTUP_WAV_DELAY_MS
+#define CFG_STARTUP_WAV_DELAY_MS 220
+#endif
 
 static void piezo_silence(void) {
     if (!use_piezo) {
@@ -288,7 +297,7 @@ static void piezo_task(void *) {
 
 static const char* i2s_sound_filename(int sound_id) {
     switch (sound_id) {
-        case SND_LAUNCH:        return "/missile-2.wav";
+        case SND_LAUNCH:        return kLaunchWavFilename;
         case SND_PLAYER_BURST:  return "/swoop-up.wav";
         case SND_INTERCEPT:     return nullptr;  /* Disabled */
         case SND_IMPACT:        return "/explode.wav";
@@ -305,6 +314,33 @@ struct I2SWavHeader {
     uint16_t bits_per_sample;
     uint32_t data_size;
 };
+
+struct I2SCachedWav {
+    int sound_id;
+    const char* filename;
+    uint8_t* data;
+    size_t data_size;
+    I2SWavHeader hdr;
+    bool loaded;
+};
+
+struct I2SMixVoice {
+    const I2SCachedWav* wav;
+    size_t byte_offset;
+    uint8_t gain;
+    bool active;
+};
+
+static I2SCachedWav i2s_cached_wavs[] = {
+    { SND_LAUNCH,       kLaunchWavFilename, nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_PLAYER_BURST, "/swoop-up.wav",   nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_IMPACT,       "/explode.wav",    nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_WAVE_COMPLETE, "/roll-up.wav",   nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_GAME_OVER,    "/finale.wav",     nullptr, 0, {0, 0, 0, 0}, false },
+    { kStartupSoundId,  kStartupWavFilename, nullptr, 0, {0, 0, 0, 0}, false },
+};
+static I2SMixVoice i2s_voices[kMaxMixVoices] = {};
+static int i2s_voice_replace_cursor = 0;
 
 static bool i2s_parse_wav_header(File& file, I2SWavHeader& hdr) {
     file.seek(0);
@@ -353,81 +389,362 @@ static bool i2s_parse_wav_header(File& file, I2SWavHeader& hdr) {
     }
 }
 
-static void i2s_stream_wav(File& file, const I2SWavHeader& hdr) {
-    /* Reconfigure I2S clock/channels for this file if needed */
-    const i2s_channel_t ch = (hdr.num_channels == 1) ? I2S_CHANNEL_MONO : I2S_CHANNEL_STEREO;
-    if (hdr.sample_rate != kI2SSampleRate || hdr.num_channels != 2) {
-        i2s_set_clk(kI2SPort, hdr.sample_rate, I2S_BITS_PER_SAMPLE_16BIT, ch);
+static bool i2s_try_cache_sound(I2SCachedWav& entry) {
+    File f = SPIFFS.open(entry.filename, FILE_READ);
+    if (!f) {
+        Serial.printf("[I2S] WAV not found for cache: %s\n", entry.filename);
+        return false;
     }
 
-    /* Buffer: sized for one chunk of stereo 16-bit frames */
+    I2SWavHeader hdr;
+    if (!i2s_parse_wav_header(f, hdr)) {
+        Serial.printf("[I2S] WAV header invalid: %s\n", entry.filename);
+        f.close();
+        return false;
+    }
+    if (hdr.sample_rate != kI2SSampleRate ||
+        hdr.bits_per_sample != 16 ||
+        (hdr.num_channels != 1 && hdr.num_channels != 2) ||
+        hdr.data_size == 0) {
+        Serial.printf("[I2S] WAV unsupported format: %s (rate=%u ch=%u bits=%u bytes=%u)\n",
+                      entry.filename,
+                      (unsigned)hdr.sample_rate,
+                      (unsigned)hdr.num_channels,
+                      (unsigned)hdr.bits_per_sample,
+                      (unsigned)hdr.data_size);
+        f.close();
+        return false;
+    }
+
+    uint8_t* pcm = (uint8_t*)heap_caps_malloc(hdr.data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!pcm) {
+        pcm = (uint8_t*)heap_caps_malloc(hdr.data_size, MALLOC_CAP_8BIT);
+    }
+    if (!pcm) {
+        Serial.printf("[I2S] WAV cache alloc failed: %s (%u bytes)\n",
+                      entry.filename,
+                      (unsigned)hdr.data_size);
+        f.close();
+        return false;
+    }
+
+    const int n_read = f.read(pcm, hdr.data_size);
+    f.close();
+    if (n_read != (int)hdr.data_size) {
+        Serial.printf("[I2S] WAV cache read short: %s %d/%u\n",
+                      entry.filename,
+                      n_read,
+                      (unsigned)hdr.data_size);
+        heap_caps_free(pcm);
+        return false;
+    }
+
+    entry.data = pcm;
+    entry.data_size = hdr.data_size;
+    entry.hdr = hdr;
+    entry.loaded = true;
+    Serial.printf("[I2S] WAV cached: %s (%u bytes, %u Hz, %u ch)\n",
+                  entry.filename,
+                  (unsigned)entry.data_size,
+                  (unsigned)entry.hdr.sample_rate,
+                  (unsigned)entry.hdr.num_channels);
+    return true;
+}
+
+static I2SCachedWav* i2s_find_cached_slot(int sound_id) {
+    const size_t n = sizeof(i2s_cached_wavs) / sizeof(i2s_cached_wavs[0]);
+    for (size_t i = 0; i < n; i++) {
+        if (i2s_cached_wavs[i].sound_id == sound_id) {
+            return &i2s_cached_wavs[i];
+        }
+    }
+    return nullptr;
+}
+
+static const I2SCachedWav* i2s_find_cached_sound(int sound_id) {
+    const size_t n = sizeof(i2s_cached_wavs) / sizeof(i2s_cached_wavs[0]);
+    for (size_t i = 0; i < n; i++) {
+        if (i2s_cached_wavs[i].sound_id == sound_id && i2s_cached_wavs[i].loaded) {
+            return &i2s_cached_wavs[i];
+        }
+    }
+    return nullptr;
+}
+
+static void i2s_preload_effects(void) {
+    const size_t n = sizeof(i2s_cached_wavs) / sizeof(i2s_cached_wavs[0]);
+    for (size_t i = 0; i < n; i++) {
+        const int sid = i2s_cached_wavs[i].sound_id;
+        if (sid == SND_LAUNCH || sid == SND_PLAYER_BURST || sid == SND_IMPACT || sid == kStartupSoundId) {
+            (void)i2s_try_cache_sound(i2s_cached_wavs[i]);
+        }
+    }
+}
+
+static int16_t i2s_clip16(int32_t sample) {
+    if (sample > 32767) return 32767;
+    if (sample < -32768) return -32768;
+    return (int16_t)sample;
+}
+
+static uint8_t i2s_master_gain(void) {
+    int g = (int)g_game_cfg.audio.wav_master_gain;
+    if (g < 0) g = 0;
+    if (g > 255) g = 255;
+    return (uint8_t)g;
+}
+
+static void i2s_apply_gain_stereo(int16_t* samples, size_t frames, uint8_t gain) {
+    if (gain == 255) return;
+    for (size_t i = 0; i < frames * 2; i++) {
+        samples[i] = (int16_t)(((int32_t)samples[i] * (int32_t)gain) / 255);
+    }
+}
+
+static uint8_t i2s_gain_for_sound(int sound_id) {
+    switch (sound_id) {
+        case SND_LAUNCH:       return 255;
+        case SND_PLAYER_BURST: return 220;
+        case SND_IMPACT:       return 180;
+        case kStartupSoundId:  return 220;
+        default:               return 210;
+    }
+}
+
+static bool i2s_play_cached_sound_blocking(int sound_id) {
+    const I2SCachedWav* wav = i2s_find_cached_sound(sound_id);
+    if (!wav) {
+        I2SCachedWav* slot = i2s_find_cached_slot(sound_id);
+        if (slot != nullptr && !slot->loaded) {
+            (void)i2s_try_cache_sound(*slot);
+            wav = i2s_find_cached_sound(sound_id);
+        }
+    }
+    if (!wav || wav->data == nullptr || wav->data_size == 0) {
+        return false;
+    }
+
     static int16_t buf[kI2SFramesPerChunk * 2];
-    uint32_t remaining = hdr.data_size;
+    const uint8_t master_gain = i2s_master_gain();
+    const uint8_t sound_gain = i2s_gain_for_sound(sound_id);
+    size_t remaining = wav->data_size;
+    const uint8_t* p = wav->data;
 
     while (remaining > 0) {
-        /* Check if a new sound has arrived — interrupt current playback */
-        int dummy;
-        if (xQueuePeek(i2s_sound_queue, &dummy, 0) == pdTRUE) {
-            break; /* New sound waiting, stop current playback */
+        const size_t max_read = (wav->hdr.num_channels == 1) ? sizeof(buf) / 2 : sizeof(buf);
+        const size_t to_read = (remaining < max_read) ? remaining : max_read;
+        memcpy(buf, p, to_read);
+        p += to_read;
+        remaining -= to_read;
+
+        size_t written;
+        if (wav->hdr.num_channels == 1) {
+            const int n_samples = (int)(to_read / 2);
+            for (int i = n_samples - 1; i >= 0; i--) {
+                buf[i * 2] = buf[i];
+                buf[i * 2 + 1] = buf[i];
+            }
+            i2s_apply_gain_stereo(buf, (size_t)n_samples, sound_gain);
+            i2s_apply_gain_stereo(buf, (size_t)n_samples, master_gain);
+            i2s_write(kI2SPort, buf, to_read * 2, &written, portMAX_DELAY);
+        } else {
+            const size_t frames = to_read / 4;
+            i2s_apply_gain_stereo(buf, frames, sound_gain);
+            i2s_apply_gain_stereo(buf, frames, master_gain);
+            i2s_write(kI2SPort, buf, to_read, &written, portMAX_DELAY);
+        }
+    }
+    return true;
+}
+
+static bool i2s_start_voice(int sound_id) {
+    const I2SCachedWav* wav = i2s_find_cached_sound(sound_id);
+    if (!wav) {
+        I2SCachedWav* slot = i2s_find_cached_slot(sound_id);
+        if (slot != nullptr && !slot->loaded) {
+            (void)i2s_try_cache_sound(*slot);
+            wav = i2s_find_cached_sound(sound_id);
+        }
+    }
+    if (!wav) {
+        return false;
+    }
+
+    int slot = -1;
+    for (int i = 0; i < kMaxMixVoices; i++) {
+        if (!i2s_voices[i].active) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        slot = i2s_voice_replace_cursor;
+        i2s_voice_replace_cursor = (i2s_voice_replace_cursor + 1) % kMaxMixVoices;
+    }
+
+    i2s_voices[slot].wav = wav;
+    i2s_voices[slot].byte_offset = 0;
+    i2s_voices[slot].gain = i2s_gain_for_sound(sound_id);
+    i2s_voices[slot].active = true;
+    return true;
+}
+
+static bool i2s_has_active_voice(void) {
+    for (int i = 0; i < kMaxMixVoices; i++) {
+        if (i2s_voices[i].active) return true;
+    }
+    return false;
+}
+
+static void i2s_stream_named_file(const char* fname) {
+    if (!fname) return;
+
+    File f = SPIFFS.open(fname, FILE_READ);
+    if (!f) {
+        Serial.printf("[I2S] WAV not found: %s\n", fname);
+        return;
+    }
+
+    I2SWavHeader hdr;
+    if (!i2s_parse_wav_header(f, hdr)) {
+        Serial.printf("[I2S] Bad WAV header: %s\n", fname);
+        f.close();
+        return;
+    }
+    if (hdr.sample_rate != kI2SSampleRate || hdr.bits_per_sample != 16 ||
+        (hdr.num_channels != 1 && hdr.num_channels != 2)) {
+        Serial.printf("[I2S] Unsupported WAV format: %s\n", fname);
+        f.close();
+        return;
+    }
+
+    static int16_t buf[kI2SFramesPerChunk * 2];
+    const uint8_t master_gain = i2s_master_gain();
+    uint32_t remaining = hdr.data_size;
+    while (remaining > 0) {
+        int pending;
+        if (xQueuePeek(i2s_sound_queue, &pending, 0) == pdTRUE) {
+            break;
         }
 
-        /* For mono we only fill half the buffer so we have room to expand */
-        const size_t max_read = (hdr.num_channels == 1)
-                                ? sizeof(buf) / 2
-                                : sizeof(buf);
-        const size_t to_read  = (remaining < (uint32_t)max_read)
-                                ? (size_t)remaining
-                                : max_read;
-        const int n_read = file.read((uint8_t*)buf, to_read);
+        const size_t max_read = (hdr.num_channels == 1) ? sizeof(buf) / 2 : sizeof(buf);
+        const size_t to_read = (remaining < (uint32_t)max_read) ? (size_t)remaining : max_read;
+        const int n_read = f.read((uint8_t*)buf, to_read);
         if (n_read <= 0) break;
         remaining -= (uint32_t)n_read;
 
         size_t written;
         if (hdr.num_channels == 1) {
-            /* Expand mono → stereo in-place (iterate backward to avoid clobber) */
             const int n_samples = n_read / 2;
             for (int i = n_samples - 1; i >= 0; i--) {
+                buf[i * 2] = buf[i];
                 buf[i * 2 + 1] = buf[i];
-                buf[i * 2]     = buf[i];
             }
+            i2s_apply_gain_stereo(buf, (size_t)n_samples, master_gain);
             i2s_write(kI2SPort, buf, (size_t)(n_read * 2), &written, portMAX_DELAY);
         } else {
+            i2s_apply_gain_stereo(buf, (size_t)n_read / 4, master_gain);
             i2s_write(kI2SPort, buf, (size_t)n_read, &written, portMAX_DELAY);
         }
     }
 
-    /* Restore default sample rate if we changed it */
-    if (hdr.sample_rate != kI2SSampleRate) {
-        i2s_set_clk(kI2SPort, kI2SSampleRate, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_STEREO);
+    f.close();
+}
+
+static void i2s_stream_sound_from_file(int sound_id) {
+    const char* fname = i2s_sound_filename(sound_id);
+    i2s_stream_named_file(fname);
+}
+
+static void i2s_mix_and_write_chunk(void) {
+    int32_t acc[kI2SFramesPerChunk * 2] = {0};
+    int16_t out[kI2SFramesPerChunk * 2] = {0};
+    bool any_active = false;
+    int active_voices = 0;
+
+    for (int v = 0; v < kMaxMixVoices; v++) {
+        I2SMixVoice& voice = i2s_voices[v];
+        if (!voice.active || voice.wav == nullptr || voice.wav->data == nullptr) {
+            continue;
+        }
+
+        const I2SWavHeader& hdr = voice.wav->hdr;
+        const int bytes_per_frame = (int)hdr.num_channels * 2;
+        if (bytes_per_frame <= 0) {
+            voice.active = false;
+            continue;
+        }
+
+        const size_t remaining_bytes = voice.wav->data_size - voice.byte_offset;
+        if (remaining_bytes < (size_t)bytes_per_frame) {
+            voice.active = false;
+            continue;
+        }
+
+        any_active = true;
+        active_voices++;
+        const size_t remaining_frames = remaining_bytes / (size_t)bytes_per_frame;
+        const size_t frames_to_mix = (remaining_frames < kI2SFramesPerChunk)
+                                     ? remaining_frames
+                                     : kI2SFramesPerChunk;
+        const int16_t* samples = (const int16_t*)(voice.wav->data + voice.byte_offset);
+
+        if (hdr.num_channels == 1) {
+            for (size_t i = 0; i < frames_to_mix; i++) {
+                const int32_t s = ((int32_t)samples[i] * (int32_t)voice.gain) / 255;
+                acc[i * 2] += s;
+                acc[i * 2 + 1] += s;
+            }
+        } else {
+            for (size_t i = 0; i < frames_to_mix; i++) {
+                const int32_t l = ((int32_t)samples[i * 2] * (int32_t)voice.gain) / 255;
+                const int32_t r = ((int32_t)samples[i * 2 + 1] * (int32_t)voice.gain) / 255;
+                acc[i * 2] += l;
+                acc[i * 2 + 1] += r;
+            }
+        }
+
+        voice.byte_offset += frames_to_mix * (size_t)bytes_per_frame;
+        if (voice.byte_offset >= voice.wav->data_size) {
+            voice.active = false;
+        }
     }
+
+    if (!any_active) {
+        return;
+    }
+
+    const int mix_scale = (active_voices > 1) ? 192 : 255;
+    const int master_gain = i2s_master_gain();
+    for (size_t i = 0; i < kI2SFramesPerChunk * 2; i++) {
+        const int64_t scaled = (int64_t)acc[i] * (int64_t)mix_scale * (int64_t)master_gain;
+        out[i] = i2s_clip16((int32_t)(scaled / (255 * 255)));
+    }
+
+    size_t written;
+    i2s_write(kI2SPort, out, sizeof(out), &written, portMAX_DELAY);
 }
 
 static void i2s_audio_task(void*) {
-    int sound_id;
+    int sound_id = 0;
     for (;;) {
-        if (xQueueReceive(i2s_sound_queue, &sound_id, portMAX_DELAY) != pdTRUE) continue;
-        
-        /* Flush any additional queued sounds to play only the most recent */
-        int newer_sound;
-        while (xQueueReceive(i2s_sound_queue, &newer_sound, 0) == pdTRUE) {
-            sound_id = newer_sound;
+        if (!i2s_has_active_voice()) {
+            if (xQueueReceive(i2s_sound_queue, &sound_id, portMAX_DELAY) == pdTRUE) {
+                if (!i2s_start_voice(sound_id)) {
+                    i2s_stream_sound_from_file(sound_id);
+                }
+            }
         }
-        
-        const char* fname = i2s_sound_filename(sound_id);
-        if (!fname) continue;
-        File f = SPIFFS.open(fname, FILE_READ);
-        if (!f) {
-            Serial.printf("[I2S] WAV not found: %s\n", fname);
-            continue;
+
+        while (xQueueReceive(i2s_sound_queue, &sound_id, 0) == pdTRUE) {
+            if (!i2s_start_voice(sound_id) && !i2s_has_active_voice()) {
+                i2s_stream_sound_from_file(sound_id);
+            }
         }
-        I2SWavHeader hdr;
-        if (!i2s_parse_wav_header(f, hdr)) {
-            Serial.printf("[I2S] Bad WAV header: %s\n", fname);
-            f.close();
-            continue;
+
+        if (i2s_has_active_voice()) {
+            i2s_mix_and_write_chunk();
         }
-        i2s_stream_wav(f, hdr);
-        f.close();
     }
 }
 
@@ -738,39 +1055,20 @@ void hal_init(void) {
 
             i2s_sound_queue = xQueueCreate(4, sizeof(int));
             if (i2s_sound_queue != nullptr) {
-                xTaskCreatePinnedToCore(i2s_audio_task, "i2s_audio",
-                                        4096, nullptr, 1, nullptr, 1);
-                use_i2s_audio = true;
+                i2s_preload_effects();
                 Serial.printf("[HAL] I2S audio: BCLK=%d LRCLK=%d DOUT=%d AMP_SD=%d\n",
                               I2S_BCLK_PIN, I2S_LRCLK_PIN, I2S_DOUT_PIN, AMP_SD_PIN);
-                
-                /* Give I2S hardware time to stabilize */
-                delay(100);
-                
-                /* Startup test beep: 1000 Hz tone for 200ms at 50% volume */
-                Serial.println("[HAL] Playing startup test beep (1000 Hz, 200ms)...");
-                const float test_tone_hz = 1000.0f;
-                const uint32_t test_duration_ms = 200;
-                const size_t test_samples = (kI2SSampleRate * test_duration_ms) / 1000;
-                int16_t test_buf[512];
-                size_t samples_sent = 0;
-                float phase = 0.0f;
-                const float phase_step = (2.0f * 3.14159f * test_tone_hz) / (float)kI2SSampleRate;
-                
-                while (samples_sent < test_samples) {
-                    const size_t chunk = (test_samples - samples_sent > 256) ? 256 : (test_samples - samples_sent);
-                    for (size_t i = 0; i < chunk; i++) {
-                        const int16_t val = (int16_t)(sinf(phase) * 16384.0f); /* ~50% volume */
-                        test_buf[i * 2] = val;     /* left */
-                        test_buf[i * 2 + 1] = val; /* right */
-                        phase += phase_step;
-                        if (phase >= 2.0f * 3.14159f) phase -= 2.0f * 3.14159f;
-                    }
-                    size_t written;
-                    i2s_write(kI2SPort, test_buf, chunk * 4, &written, portMAX_DELAY);
-                    samples_sent += chunk;
+
+                /* Let amp and clocks settle before startup audio. */
+                delay(CFG_STARTUP_WAV_DELAY_MS);
+                Serial.printf("[HAL] Playing startup WAV: %s\n", kStartupWavFilename);
+                if (!i2s_play_cached_sound_blocking(kStartupSoundId)) {
+                    i2s_stream_named_file(kStartupWavFilename);
                 }
-                Serial.printf("[HAL] Test beep complete (%u samples sent)\n", (unsigned)samples_sent);
+
+                xTaskCreatePinnedToCore(i2s_audio_task, "i2s_audio",
+                                        4096, nullptr, 3, nullptr, 1);
+                use_i2s_audio = true;
             } else {
                 Serial.println("[HAL] I2S queue alloc failed");
             }
@@ -1021,7 +1319,12 @@ void hal_fade_to_black(uint8_t amount) {
 void hal_play_sound(int sound_id) {
     /* I2S audio (MAX98357A) takes priority when wired */
     if (use_i2s_audio && i2s_sound_queue != nullptr) {
-        xQueueSend(i2s_sound_queue, &sound_id, 0);
+        if (sound_id == SND_LAUNCH) {
+            /* Launch sound is queued at front so it starts quickly. */
+            xQueueSendToFront(i2s_sound_queue, &sound_id, 0);
+        } else {
+            xQueueSend(i2s_sound_queue, &sound_id, 0);
+        }
         return;
     }
     /* Fallback: piezo buzzer */
