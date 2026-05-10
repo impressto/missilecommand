@@ -290,7 +290,7 @@ static const char* i2s_sound_filename(int sound_id) {
     switch (sound_id) {
         case SND_LAUNCH:        return "/missile-2.wav";
         case SND_PLAYER_BURST:  return "/swoop-up.wav";
-        case SND_INTERCEPT:     return "/incoming-missile.wav";
+        case SND_INTERCEPT:     return nullptr;  /* Disabled */
         case SND_IMPACT:        return "/explode.wav";
         case SND_ALERT:         return nullptr;  /* Disabled */
         case SND_WAVE_COMPLETE: return "/roll-up.wav";
