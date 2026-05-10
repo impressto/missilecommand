@@ -29,14 +29,14 @@ Match the format from the test project:
 - **Format**: PCM (uncompressed), not MP3/AAC/etc.
 - **Bit depth**: 16-bit
 - **Channels**: Mono or stereo (mono is automatically expanded to stereo by the driver)
-- **Sample rate**: 44.1 kHz recommended (other rates will play at correct pitch — the I2S clock is reconfigured per file)
+- **Sample rate**: 22.05 kHz (to match current ESP32 I2S engine setting)
 - **File size**: Keep individual effects under ~500 KB; the SPIFFS partition holds ~1.5 MB total
 
 ## Converting with ffmpeg
 
 ```bash
 # From any audio format → correct WAV format
-ffmpeg -i input.mp3 -acodec pcm_s16le -ar 44100 -ac 2 launch.wav
+ffmpeg -i input.mp3 -acodec pcm_s16le -ar 22050 -ac 2 launch.wav
 ```
 
 ## Source: MIDI Files
@@ -45,7 +45,7 @@ The original MIDI sequences used by the old piezo buzzer are in `wasm/sounds/`.
 You can render them to WAV with a soundfont and a MIDI renderer, for example:
 
 ```bash
-fluidsynth -ni soundfont.sf2 wasm/sounds/explode.mid -F impact.wav -r 44100
+fluidsynth -ni soundfont.sf2 wasm/sounds/explode.mid -F impact.wav -r 22050
 ```
 
 Then convert with ffmpeg to ensure the right format.

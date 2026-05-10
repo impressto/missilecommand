@@ -197,7 +197,7 @@ static bool use_piezo = false;
 
 /* ── I2S / MAX98357A audio state ─────────────────────────────────────────── */
 static const i2s_port_t   kI2SPort          = I2S_NUM_0;
-static const uint32_t     kI2SSampleRate     = 44100;
+static const uint32_t     kI2SSampleRate     = 22050;
 static const size_t       kI2SFramesPerChunk = 256;
 static const char*        kLaunchWavFilename = "/outgoing-missile.wav";
 static const char*        kStartupWavFilename = "/startup.wav";
