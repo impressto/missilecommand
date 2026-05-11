@@ -211,6 +211,8 @@ static const int          kStartupSoundId     = 100;
 static const int          kMaxMixVoices      = 3;
 static QueueHandle_t      i2s_sound_queue    = nullptr;
 static bool               use_i2s_audio      = false;
+static volatile bool      startup_wav_pending = false;
+static volatile bool      startup_wav_active = false;
 
 static void piezo_silence(void) {
     if (!use_piezo) {
@@ -312,6 +314,7 @@ static void piezo_task(void *) {
 static const char* i2s_sound_filename(int sound_id) {
     switch (sound_id) {
         case SND_LAUNCH:        return theme_is_alternate() ? "/peppa_incoming-missile.wav" : kDefaultLaunchWavFilename;
+        case kStartupSoundId:   return theme_is_alternate() ? "/peppa_startup.wav" : kDefaultStartupWavFilename;
         case SND_PLAYER_BURST:  return theme_is_alternate() ? "/peppa_swoop-up.wav" : "/default_swoop-up.wav";
         case SND_INTERCEPT:     return nullptr;  /* Disabled */
         case SND_IMPACT:        return theme_is_alternate() ? "/peppa_explode.wav" : "/default_explode.wav";
@@ -485,6 +488,35 @@ static const I2SCachedWav* i2s_find_cached_sound(int sound_id) {
     return nullptr;
 }
 
+/* Ensures the cached slot for sound_id holds the file for the current theme.
+   If the theme has changed since last cache, frees the old PCM and reloads. */
+static I2SCachedWav* i2s_ensure_theme_wav(int sound_id) {
+    const char* expected = i2s_sound_filename(sound_id);
+    if (!expected) return nullptr;
+
+    I2SCachedWav* slot = i2s_find_cached_slot(sound_id);
+    if (!slot) return nullptr;
+
+    if (slot->loaded && strcmp(slot->filename, expected) != 0) {
+        /* Theme changed — free old PCM and mark unloaded. */
+        if (slot->data) {
+            heap_caps_free(slot->data);
+            slot->data = nullptr;
+        }
+        slot->data_size = 0;
+        memset(&slot->hdr, 0, sizeof(slot->hdr));
+        slot->loaded = false;
+        slot->filename = expected;
+    } else if (!slot->loaded) {
+        slot->filename = expected;
+    }
+
+    if (!slot->loaded) {
+        (void)i2s_try_cache_sound(*slot);
+    }
+    return slot->loaded ? slot : nullptr;
+}
+
 static void i2s_preload_effects(void) {
     const size_t n = sizeof(i2s_cached_wavs) / sizeof(i2s_cached_wavs[0]);
     for (size_t i = 0; i < n; i++) {
@@ -526,14 +558,7 @@ static uint8_t i2s_gain_for_sound(int sound_id) {
 }
 
 static bool i2s_play_cached_sound_blocking(int sound_id) {
-    const I2SCachedWav* wav = i2s_find_cached_sound(sound_id);
-    if (!wav) {
-        I2SCachedWav* slot = i2s_find_cached_slot(sound_id);
-        if (slot != nullptr && !slot->loaded) {
-            (void)i2s_try_cache_sound(*slot);
-            wav = i2s_find_cached_sound(sound_id);
-        }
-    }
+    const I2SCachedWav* wav = i2s_ensure_theme_wav(sound_id);
     if (!wav || wav->data == nullptr || wav->data_size == 0) {
         return false;
     }
@@ -572,14 +597,7 @@ static bool i2s_play_cached_sound_blocking(int sound_id) {
 }
 
 static bool i2s_start_voice(int sound_id) {
-    const I2SCachedWav* wav = i2s_find_cached_sound(sound_id);
-    if (!wav) {
-        I2SCachedWav* slot = i2s_find_cached_slot(sound_id);
-        if (slot != nullptr && !slot->loaded) {
-            (void)i2s_try_cache_sound(*slot);
-            wav = i2s_find_cached_sound(sound_id);
-        }
-    }
+    const I2SCachedWav* wav = i2s_ensure_theme_wav(sound_id);
     if (!wav) {
         return false;
     }
@@ -596,10 +614,19 @@ static bool i2s_start_voice(int sound_id) {
         i2s_voice_replace_cursor = (i2s_voice_replace_cursor + 1) % kMaxMixVoices;
     }
 
+    if (i2s_voices[slot].active && i2s_voices[slot].wav != nullptr &&
+        i2s_voices[slot].wav->sound_id == kStartupSoundId) {
+        startup_wav_active = false;
+    }
+
     i2s_voices[slot].wav = wav;
     i2s_voices[slot].byte_offset = 0;
     i2s_voices[slot].gain = i2s_gain_for_sound(sound_id);
     i2s_voices[slot].active = true;
+    if (sound_id == kStartupSoundId) {
+        startup_wav_pending = false;
+        startup_wav_active = true;
+    }
     return true;
 }
 
@@ -666,8 +693,15 @@ static void i2s_stream_named_file(const char* fname) {
 }
 
 static void i2s_stream_sound_from_file(int sound_id) {
+    if (sound_id == kStartupSoundId) {
+        startup_wav_pending = false;
+        startup_wav_active = true;
+    }
     const char* fname = i2s_sound_filename(sound_id);
     i2s_stream_named_file(fname);
+    if (sound_id == kStartupSoundId) {
+        startup_wav_active = false;
+    }
 }
 
 static void i2s_mix_and_write_chunk(void) {
@@ -720,6 +754,9 @@ static void i2s_mix_and_write_chunk(void) {
 
         voice.byte_offset += frames_to_mix * (size_t)bytes_per_frame;
         if (voice.byte_offset >= voice.wav->data_size) {
+            if (voice.wav->sound_id == kStartupSoundId) {
+                startup_wav_active = false;
+            }
             voice.active = false;
         }
     }
@@ -744,6 +781,9 @@ static void i2s_audio_task(void*) {
     for (;;) {
         if (!i2s_has_active_voice()) {
             if (xQueueReceive(i2s_sound_queue, &sound_id, portMAX_DELAY) == pdTRUE) {
+                if (sound_id == kStartupSoundId) {
+                    startup_wav_pending = false;
+                }
                 if (!i2s_start_voice(sound_id)) {
                     i2s_stream_sound_from_file(sound_id);
                 }
@@ -751,6 +791,9 @@ static void i2s_audio_task(void*) {
         }
 
         while (xQueueReceive(i2s_sound_queue, &sound_id, 0) == pdTRUE) {
+            if (sound_id == kStartupSoundId) {
+                startup_wav_pending = false;
+            }
             if (!i2s_start_voice(sound_id) && !i2s_has_active_voice()) {
                 i2s_stream_sound_from_file(sound_id);
             }
@@ -1455,6 +1498,12 @@ void hal_play_sound(int sound_id) {
     (void)xQueueSend(sound_queue, &sound_id, 0);
 }
 
+void hal_reset_startup_wav_once(void) {
+    startup_wav_played = false;
+    startup_wav_pending = false;
+    startup_wav_active = false;
+}
+
 void hal_play_startup_wav_once(void) {
     if (startup_wav_played) {
         return;
@@ -1462,6 +1511,8 @@ void hal_play_startup_wav_once(void) {
     startup_wav_played = true;
 
     if (!use_i2s_audio || i2s_sound_queue == nullptr) {
+        startup_wav_pending = false;
+        startup_wav_active = false;
         return;
     }
 
@@ -1484,7 +1535,17 @@ void hal_play_startup_wav_once(void) {
 
     Serial.printf("[HAL] Playing startup WAV: %s\n", startup_file);
     const int sid = kStartupSoundId;
-    (void)xQueueSendToFront(i2s_sound_queue, &sid, 0);
+    startup_wav_pending = true;
+    if (xQueueSendToFront(i2s_sound_queue, &sid, 0) != pdTRUE) {
+        startup_wav_pending = false;
+    }
+}
+
+int hal_is_startup_wav_busy(void) {
+    if (!use_i2s_audio || i2s_sound_queue == nullptr) {
+        return 0;
+    }
+    return (startup_wav_pending || startup_wav_active) ? 1 : 0;
 }
 
 } /* extern "C" */

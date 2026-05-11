@@ -190,7 +190,9 @@ uint32_t hal_ticks_ms(void);
  * prefer frame-rate limiting via hal_ticks_ms().
  */
 void hal_delay_ms(uint32_t ms);
+void hal_reset_startup_wav_once(void);
 void hal_play_startup_wav_once(void);
+int hal_is_startup_wav_busy(void);
 
 /* ── Sound IDs ───────────────────────────────────────────────────────────── */
 #define SND_LAUNCH        0   /* player missile fired           */

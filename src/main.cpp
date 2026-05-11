@@ -36,6 +36,9 @@ static uint32_t ble_connected_since_ms = 0;
 static uint32_t last_mouse_report_ms = 0;
 static int prev_mouse_cursor_x = SCREEN_W / 2;
 static int prev_mouse_cursor_y = SCREEN_H / 2;
+static int pending_game_startup_wav = 0;
+static int waiting_for_startup_wav = 0;
+static uint32_t startup_wav_wait_started_ms = 0;
 
 enum AppMode {
     APP_MENU = 0,
@@ -114,19 +117,19 @@ static void draw_start_menu() {
     const uint16_t mouse_col = (menu_selected == MENU_MOUSE_MODE) ? COL_CYAN : COL_WHITE;
 
     if (theme2_preview) {
-        draw_text_scaled_centered(84, "THEME 2", COL_ORANGE, 2);
-        draw_text_centered(102, "NEON ASSAULT PROFILE", COL_CYAN, COL_BLACK);
-        draw_text_centered(118, (menu_selected == MENU_PLAY_CLASSIC) ? "> PLAY CLASSIC" : "  PLAY CLASSIC", classic_col, COL_BLACK);
-        draw_text_scaled_centered(132, (menu_selected == MENU_PLAY_THEME_2) ? "> PLAY THEME 2" : "  PLAY THEME 2", theme2_col, 2);
-        draw_text_centered(154, (menu_selected == MENU_DEMO_MODE) ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
-        draw_text_centered(170, (menu_selected == MENU_MOUSE_MODE) ? "> MOUSE MODE" : "  MOUSE MODE", mouse_col, COL_BLACK);
+        draw_text_scaled_centered(114, "THEME 2", COL_ORANGE, 2);
+        draw_text_centered(132, "NEON ASSAULT PROFILE", COL_CYAN, COL_BLACK);
+        draw_text_centered(148, (menu_selected == MENU_PLAY_CLASSIC) ? "> PLAY CLASSIC" : "  PLAY CLASSIC", classic_col, COL_BLACK);
+        draw_text_scaled_centered(162, (menu_selected == MENU_PLAY_THEME_2) ? "> PLAY THEME 2" : "  PLAY THEME 2", theme2_col, 2);
+        draw_text_centered(184, (menu_selected == MENU_DEMO_MODE) ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
+        draw_text_centered(200, (menu_selected == MENU_MOUSE_MODE) ? "> MOUSE MODE" : "  MOUSE MODE", mouse_col, COL_BLACK);
     } else {
-        draw_text_scaled_centered(84, "CLASSIC", COL_GREEN, 2);
-        draw_text_centered(102, "ORIGINAL DEFENSE PROFILE", COL_WHITE, COL_BLACK);
-        draw_text_centered(118, (menu_selected == MENU_PLAY_CLASSIC) ? "> PLAY CLASSIC" : "  PLAY CLASSIC", classic_col, COL_BLACK);
-        draw_text_centered(134, (menu_selected == MENU_PLAY_THEME_2) ? "> PLAY THEME 2" : "  PLAY THEME 2", theme2_col, COL_BLACK);
-        draw_text_centered(150, (menu_selected == MENU_DEMO_MODE) ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
-        draw_text_centered(166, (menu_selected == MENU_MOUSE_MODE) ? "> MOUSE MODE" : "  MOUSE MODE", mouse_col, COL_BLACK);
+        draw_text_scaled_centered(114, "CLASSIC", COL_GREEN, 2);
+        draw_text_centered(132, "ORIGINAL DEFENSE PROFILE", COL_WHITE, COL_BLACK);
+        draw_text_centered(148, (menu_selected == MENU_PLAY_CLASSIC) ? "> PLAY CLASSIC" : "  PLAY CLASSIC", classic_col, COL_BLACK);
+        draw_text_centered(164, (menu_selected == MENU_PLAY_THEME_2) ? "> PLAY THEME 2" : "  PLAY THEME 2", theme2_col, COL_BLACK);
+        draw_text_centered(180, (menu_selected == MENU_DEMO_MODE) ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
+        draw_text_centered(196, (menu_selected == MENU_MOUSE_MODE) ? "> MOUSE MODE" : "  MOUSE MODE", mouse_col, COL_BLACK);
     }
     hal_present();
 }
@@ -186,6 +189,10 @@ static void update_start_menu(uint32_t now) {
             hal_set_theme(selected_theme);
             game_set_demo_mode(menu_selected == MENU_DEMO_MODE);
             game_init();
+            hal_reset_startup_wav_once();
+            pending_game_startup_wav = 1;
+            waiting_for_startup_wav = 1;
+            startup_wav_wait_started_ms = hal_ticks_ms();
             last_ticks = hal_ticks_ms();
             app_mode = APP_GAME;
         }
@@ -193,7 +200,6 @@ static void update_start_menu(uint32_t now) {
 
     prev_menu_buttons = buttons;
     draw_start_menu();
-    hal_play_startup_wav_once();
 }
 
 static void draw_mouse_mode_screen(bool connected) {
@@ -397,6 +403,20 @@ void loop() {
 
     if (app_mode == APP_MOUSE) {
         update_mouse_mode(now);
+        return;
+    }
+
+    if (waiting_for_startup_wav) {
+        game_render();
+        if (pending_game_startup_wav) {
+            hal_play_startup_wav_once();
+            pending_game_startup_wav = 0;
+        }
+        if (hal_is_startup_wav_busy() && (now - startup_wav_wait_started_ms) < 6000) {
+            return;
+        }
+        waiting_for_startup_wav = 0;
+        last_ticks = now;
         return;
     }
 
