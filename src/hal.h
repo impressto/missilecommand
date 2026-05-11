@@ -59,6 +59,7 @@ void hal_init(void);
  * hal_clear(color) — fill the entire framebuffer with a solid colour.
  */
 void hal_clear(uint16_t color);
+void hal_draw_rgb565_background(const uint16_t *img);
 
 /**
  * hal_draw_pixel(x, y, color) — set a single pixel.
@@ -114,6 +115,14 @@ void hal_draw_text(int x, int y, const char *str, uint16_t color, uint16_t bg);
 /* ── Sprite IDs ──────────────────────────────────────────────────────────── */
 #define SPRITE_CITY    0   /* civilian target building */
 #define SPRITE_BUNKER  1   /* missile battery / bunker */
+
+typedef enum {
+	THEME_CLASSIC = 0,
+	THEME_ALTERNATE = 1,
+} ThemeId;
+
+void hal_set_theme(int theme_id);
+int hal_get_theme(void);
 
 /**
  * hal_draw_text_scaled(x, y, str, color, scale) — draw a string using the
@@ -181,6 +190,7 @@ uint32_t hal_ticks_ms(void);
  * prefer frame-rate limiting via hal_ticks_ms().
  */
 void hal_delay_ms(uint32_t ms);
+void hal_play_startup_wav_once(void);
 
 /* ── Sound IDs ───────────────────────────────────────────────────────────── */
 #define SND_LAUNCH        0   /* player missile fired           */

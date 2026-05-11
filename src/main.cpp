@@ -11,6 +11,8 @@
 #include <BLEDevice.h>
 #include "hal.h"              /* local to esp32/src */
 #include "missile_command.h"
+#include "default_startmenu_background.h"
+#include "peppa_startmenu_background.h"
 
 #ifndef JOY_X_PIN
 #define JOY_X_PIN -1
@@ -45,10 +47,11 @@ static AppMode app_mode = APP_MENU;
 static int menu_selected = 0;
 
 enum MenuItem {
-    MENU_PLAY_NOW = 0,
-    MENU_DEMO_MODE = 1,
-    MENU_MOUSE_MODE = 2,
-    MENU_ITEM_COUNT = 3,
+    MENU_PLAY_CLASSIC = 0,
+    MENU_PLAY_THEME_2 = 1,
+    MENU_DEMO_MODE = 2,
+    MENU_MOUSE_MODE = 3,
+    MENU_ITEM_COUNT = 4,
 };
 
 static BleMouse ble_mouse("MissileCommand Mouse", "impressto", 100);
@@ -94,24 +97,36 @@ static void draw_text_centered(int y, const char *str, uint16_t color, uint16_t 
     hal_draw_text(x, y, str, color, bg);
 }
 
-static void draw_start_menu() {
-    hal_clear(COL_BLACK);
-    hal_draw_rect(14, 18, SCREEN_W - 28, 196, COL_BLACK);
-    draw_text_centered(34, "MISSILE COMMAND", COL_CYAN, COL_BLACK);
-    draw_text_centered(56, "ESP32 START MENU", COL_WHITE, COL_BLACK);
+static void draw_text_scaled_centered(int y, const char *str, uint16_t color, int scale) {
+    const int s = (scale < 1) ? 1 : scale;
+    const int x = (SCREEN_W - (text_pixel_width(str) * s)) / 2;
+    hal_draw_text_scaled(x, y, str, color, s);
+}
 
-    const uint16_t play_col = (menu_selected == MENU_PLAY_NOW) ? COL_GREEN : COL_WHITE;
+static void draw_start_menu() {
+    const int theme2_preview = (menu_selected == MENU_PLAY_THEME_2);
+    hal_set_theme(theme2_preview ? THEME_ALTERNATE : THEME_CLASSIC);
+    hal_draw_rgb565_background(theme2_preview ? peppa_startmenu_background_1 : default_startmenu_background_1);
+
+    const uint16_t classic_col = (menu_selected == MENU_PLAY_CLASSIC) ? COL_GREEN : COL_WHITE;
+    const uint16_t theme2_col = (menu_selected == MENU_PLAY_THEME_2) ? COL_ORANGE : COL_WHITE;
     const uint16_t demo_col = (menu_selected == MENU_DEMO_MODE) ? COL_YELLOW : COL_WHITE;
     const uint16_t mouse_col = (menu_selected == MENU_MOUSE_MODE) ? COL_CYAN : COL_WHITE;
-    draw_text_centered(104, (menu_selected == MENU_PLAY_NOW) ? "> PLAY NOW" : "  PLAY NOW", play_col, COL_BLACK);
-    draw_text_centered(120, (menu_selected == MENU_DEMO_MODE) ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
-    draw_text_centered(136, (menu_selected == MENU_MOUSE_MODE) ? "> MOUSE MODE" : "  MOUSE MODE", mouse_col, COL_BLACK);
 
-    draw_text_centered(174, "Move joystick up/down to select", COL_GRAY, COL_BLACK);
-    if (menu_fire_armed) {
-        draw_text_centered(188, "Press fire button to start", COL_GRAY, COL_BLACK);
+    if (theme2_preview) {
+        draw_text_scaled_centered(84, "THEME 2", COL_ORANGE, 2);
+        draw_text_centered(102, "NEON ASSAULT PROFILE", COL_CYAN, COL_BLACK);
+        draw_text_centered(118, (menu_selected == MENU_PLAY_CLASSIC) ? "> PLAY CLASSIC" : "  PLAY CLASSIC", classic_col, COL_BLACK);
+        draw_text_scaled_centered(132, (menu_selected == MENU_PLAY_THEME_2) ? "> PLAY THEME 2" : "  PLAY THEME 2", theme2_col, 2);
+        draw_text_centered(154, (menu_selected == MENU_DEMO_MODE) ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
+        draw_text_centered(170, (menu_selected == MENU_MOUSE_MODE) ? "> MOUSE MODE" : "  MOUSE MODE", mouse_col, COL_BLACK);
     } else {
-        draw_text_centered(188, "Release fire to arm menu", COL_GRAY, COL_BLACK);
+        draw_text_scaled_centered(84, "CLASSIC", COL_GREEN, 2);
+        draw_text_centered(102, "ORIGINAL DEFENSE PROFILE", COL_WHITE, COL_BLACK);
+        draw_text_centered(118, (menu_selected == MENU_PLAY_CLASSIC) ? "> PLAY CLASSIC" : "  PLAY CLASSIC", classic_col, COL_BLACK);
+        draw_text_centered(134, (menu_selected == MENU_PLAY_THEME_2) ? "> PLAY THEME 2" : "  PLAY THEME 2", theme2_col, COL_BLACK);
+        draw_text_centered(150, (menu_selected == MENU_DEMO_MODE) ? "> DEMO MODE" : "  DEMO MODE", demo_col, COL_BLACK);
+        draw_text_centered(166, (menu_selected == MENU_MOUSE_MODE) ? "> MOUSE MODE" : "  MOUSE MODE", mouse_col, COL_BLACK);
     }
     hal_present();
 }
@@ -167,6 +182,8 @@ static void update_start_menu(uint32_t now) {
             prev_mouse_cursor_y = hal_read_cursor_y();
             calibrate_mouse_joystick_center();
         } else {
+            const int selected_theme = (menu_selected == MENU_PLAY_THEME_2) ? THEME_ALTERNATE : THEME_CLASSIC;
+            hal_set_theme(selected_theme);
             game_set_demo_mode(menu_selected == MENU_DEMO_MODE);
             game_init();
             last_ticks = hal_ticks_ms();
@@ -176,6 +193,7 @@ static void update_start_menu(uint32_t now) {
 
     prev_menu_buttons = buttons;
     draw_start_menu();
+    hal_play_startup_wav_once();
 }
 
 static void draw_mouse_mode_screen(bool connected) {

@@ -814,16 +814,58 @@ static uint8_t final_city_fade_amount(uint32_t ms_left) {
     return (uint8_t)a;
 }
 
+static int theme_is_alternate(void) {
+    return hal_get_theme() == THEME_ALTERNATE;
+}
+
+static uint16_t theme_color(uint16_t classic_color, uint16_t alternate_color) {
+    return theme_is_alternate() ? alternate_color : classic_color;
+}
+
 void game_render(void) {
     /* ── Background ──────────────────────────────────────────────────────── */
     hal_clear(COL_BLACK);
+
+    const int alt_theme = theme_is_alternate();
+
+    const uint16_t hud_label_color = theme_color(g_game_cfg.ui.hud_label_color, COL_CYAN);
+    const uint16_t hud_score_value_color = theme_color(g_game_cfg.ui.hud_score_value_color, COL_ORANGE);
+    const uint16_t hud_wave_value_color = theme_color(g_game_cfg.ui.hud_wave_value_color, COL_YELLOW);
+    const uint16_t crosshair_color = theme_color(g_game_cfg.ui.crosshair_color, COL_CYAN);
+    const uint16_t crosshair_center_color = theme_color(g_game_cfg.ui.crosshair_center_color, COL_ORANGE);
+    const uint16_t star_color = theme_color(g_game_cfg.ui.star_color, COL_BLUE);
+    const uint16_t ammo_color = theme_color(g_game_cfg.ammo.indicator_color, COL_ORANGE);
+    const uint16_t overlay_bg_color = theme_color(g_game_cfg.ui.overlay_bg_color, COL_DKBLUE);
+    const uint16_t overlay_title_color = theme_color(g_game_cfg.ui.wave_complete_title_color, COL_ORANGE);
+    const uint16_t overlay_label_color = theme_color(g_game_cfg.ui.wave_complete_bonus_label_color, COL_CYAN);
+    const uint16_t overlay_value_color = theme_color(g_game_cfg.ui.wave_complete_bonus_value_color, COL_YELLOW);
+    const uint16_t overlay_next_color = theme_color(g_game_cfg.ui.wave_complete_next_color, COL_GREEN);
+    const uint16_t game_over_title_color = theme_color(g_game_cfg.ui.game_over_title_color, COL_ORANGE);
+    const uint16_t game_over_subtitle_color = theme_color(g_game_cfg.ui.game_over_subtitle_color, COL_WHITE);
+
+    const uint8_t enemy_trail_lead_r = alt_theme ? 255u : g_game_cfg.trail.lead_r;
+    const uint8_t enemy_trail_lead_g = alt_theme ? 64u  : g_game_cfg.trail.lead_g;
+    const uint8_t enemy_trail_lead_b = alt_theme ? 255u : g_game_cfg.trail.lead_b;
+    const uint8_t enemy_trail_tail_r = alt_theme ? 32u  : g_game_cfg.trail.tail_r;
+    const uint8_t enemy_trail_tail_g = alt_theme ? 0u   : g_game_cfg.trail.tail_g;
+    const uint8_t enemy_trail_tail_b = alt_theme ? 64u  : g_game_cfg.trail.tail_b;
+    const uint16_t enemy_tip_color = alt_theme ? COL_CYAN : g_game_cfg.trail.tip_color;
+
+    const uint8_t player_trail_lead_r = alt_theme ? 255u : g_game_cfg.trail.player_lead_r;
+    const uint8_t player_trail_lead_g = alt_theme ? 220u : g_game_cfg.trail.player_lead_g;
+    const uint8_t player_trail_lead_b = alt_theme ? 120u : g_game_cfg.trail.player_lead_b;
+    const uint8_t player_trail_tail_r = alt_theme ? 96u  : g_game_cfg.trail.player_tail_r;
+    const uint8_t player_trail_tail_g = alt_theme ? 40u  : g_game_cfg.trail.player_tail_g;
+    const uint8_t player_trail_tail_b = alt_theme ? 8u   : g_game_cfg.trail.player_tail_b;
+    const uint16_t player_missile_main_color = alt_theme ? COL_ORANGE : g_game_cfg.ui.player_missile_main_color;
+    const uint16_t player_missile_shadow_color = alt_theme ? COL_YELLOW : g_game_cfg.ui.player_missile_shadow_color;
 
     /* ── Stars (deterministic, based on position) ────────────────────────── */
     /* A handful of fixed star positions to avoid rand() per frame */
     static const uint16_t star_x[] = {15, 42, 87, 130, 175, 210, 260, 300, 55, 185, 240};
     static const uint8_t  star_y[] = {8,  20,  5,  35,  12,  50,  18,  40, 60,  30,   7};
     for (int s = 0; s < (int)(sizeof(star_x) / sizeof(star_x[0])); s++) {
-        hal_draw_pixel(star_x[s], star_y[s], g_game_cfg.ui.star_color);
+        hal_draw_pixel(star_x[s], star_y[s], star_color);
     }
 
     /* ── Ground ──────────────────────────────────────────────────────────── */
@@ -864,7 +906,7 @@ void game_render(void) {
                     Positive indicator_y_offset shifts the number down,
                negative shifts it up.                                    */
                 int ty = GROUND_Y - (7 * s) / 2 + g_game_cfg.ammo.indicator_y_offset;
-                hal_draw_text_scaled(tx, ty, buf, g_game_cfg.ammo.indicator_color, s);
+                hal_draw_text_scaled(tx, ty, buf, ammo_color, s);
         }
     }
 
@@ -892,9 +934,9 @@ void game_render(void) {
                 if (dist >= g_game_cfg.trail.fade_dist) break;
                 if (hy >= g_game_cfg.trail.enemy_render_min_y) {
                     int blend = (dist * 255) / blend_den;
-                    uint8_t r = (uint8_t)((g_game_cfg.trail.lead_r * (255 - blend) + g_game_cfg.trail.tail_r * blend) / 255);
-                    uint8_t g = (uint8_t)((g_game_cfg.trail.lead_g * (255 - blend) + g_game_cfg.trail.tail_g * blend) / 255);
-                    uint8_t b = (uint8_t)((g_game_cfg.trail.lead_b * (255 - blend) + g_game_cfg.trail.tail_b * blend) / 255);
+                    uint8_t r = (uint8_t)((enemy_trail_lead_r * (255 - blend) + enemy_trail_tail_r * blend) / 255);
+                    uint8_t g = (uint8_t)((enemy_trail_lead_g * (255 - blend) + enemy_trail_tail_g * blend) / 255);
+                    uint8_t b = (uint8_t)((enemy_trail_lead_b * (255 - blend) + enemy_trail_tail_b * blend) / 255);
                     hal_draw_pixel(hx, hy, RGB565(r, g, b));
                 }
                 prev_hx = hx;
@@ -902,7 +944,7 @@ void game_render(void) {
             }
         }
         if (py >= g_game_cfg.trail.enemy_render_min_y) {
-            hal_draw_pixel(px, py, g_game_cfg.trail.tip_color);
+            hal_draw_pixel(px, py, enemy_tip_color);
         }
     }
 
@@ -926,9 +968,9 @@ void game_render(void) {
                     int den = steps > 1 ? (steps - 1) : 1;
                     for (int t = 1; t <= steps; t++) {
                         int blend = ((t - 1) * 255) / den;
-                        uint8_t r = (uint8_t)((g_game_cfg.trail.player_lead_r * (255 - blend) + g_game_cfg.trail.player_tail_r * blend) / 255);
-                        uint8_t g = (uint8_t)((g_game_cfg.trail.player_lead_g * (255 - blend) + g_game_cfg.trail.player_tail_g * blend) / 255);
-                        uint8_t b = (uint8_t)((g_game_cfg.trail.player_lead_b * (255 - blend) + g_game_cfg.trail.player_tail_b * blend) / 255);
+                        uint8_t r = (uint8_t)((player_trail_lead_r * (255 - blend) + player_trail_tail_r * blend) / 255);
+                        uint8_t g = (uint8_t)((player_trail_lead_g * (255 - blend) + player_trail_tail_g * blend) / 255);
+                        uint8_t b = (uint8_t)((player_trail_lead_b * (255 - blend) + player_trail_tail_b * blend) / 255);
                         int tx = px - (dx * t) / mag;
                         int ty = py - (dy * t) / mag;
                         hal_draw_pixel(tx, ty, RGB565(r, g, b));
@@ -937,9 +979,9 @@ void game_render(void) {
             }
         }
 
-        hal_draw_pixel(px,     py,     g_game_cfg.ui.player_missile_main_color);
-        hal_draw_pixel(px + 1, py,     g_game_cfg.ui.player_missile_shadow_color);
-        hal_draw_pixel(px,     py + 1, g_game_cfg.ui.player_missile_shadow_color);
+        hal_draw_pixel(px,     py,     player_missile_main_color);
+        hal_draw_pixel(px + 1, py,     player_missile_shadow_color);
+        hal_draw_pixel(px,     py + 1, player_missile_shadow_color);
     }
 
     /* ── Explosions ──────────────────────────────────────────────────────── */
@@ -959,11 +1001,11 @@ void game_render(void) {
     {
         int cx = gs.cursor_x;
         int cy = gs.cursor_y;
-        hal_draw_line(cx - 6, cy, cx - 2, cy, g_game_cfg.ui.crosshair_color);
-        hal_draw_line(cx + 2, cy, cx + 6, cy, g_game_cfg.ui.crosshair_color);
-        hal_draw_line(cx, cy - 6, cx, cy - 2, g_game_cfg.ui.crosshair_color);
-        hal_draw_line(cx, cy + 2, cx, cy + 6, g_game_cfg.ui.crosshair_color);
-        hal_draw_pixel(cx, cy, g_game_cfg.ui.crosshair_center_color);
+        hal_draw_line(cx - 6, cy, cx - 2, cy, crosshair_color);
+        hal_draw_line(cx + 2, cy, cx + 6, cy, crosshair_color);
+        hal_draw_line(cx, cy - 6, cx, cy - 2, crosshair_color);
+        hal_draw_line(cx, cy + 2, cx, cy + 6, crosshair_color);
+        hal_draw_pixel(cx, cy, crosshair_center_color);
     }
 
     /* ── HUD ─────────────────────────────────────────────────────────────── */
@@ -978,8 +1020,8 @@ void game_render(void) {
         else { while (s > 0) { buf[--i] = '0' + (s % 10); s /= 10; } }
         {
             int label_w = (int)strlen(g_game_cfg.ui.hud_score_label) * 6;
-            hal_draw_text(g_game_cfg.ui.hud_score_x, 2, g_game_cfg.ui.hud_score_label, g_game_cfg.ui.hud_label_color, COL_BLACK);
-            hal_draw_text(g_game_cfg.ui.hud_score_x + label_w, 2, &buf[i], g_game_cfg.ui.hud_score_value_color, COL_BLACK);
+            hal_draw_text(g_game_cfg.ui.hud_score_x, 2, g_game_cfg.ui.hud_score_label, hud_label_color, COL_BLACK);
+            hal_draw_text(g_game_cfg.ui.hud_score_x + label_w, 2, &buf[i], hud_score_value_color, COL_BLACK);
         }
 
         /* Wave */
@@ -988,8 +1030,8 @@ void game_render(void) {
         while (w > 0) { buf[--i] = '0' + (w % 10); w /= 10; }
         {
             int label_w = (int)strlen(g_game_cfg.ui.hud_wave_label) * 6;
-            hal_draw_text(g_game_cfg.ui.hud_wave_x, 2, g_game_cfg.ui.hud_wave_label, g_game_cfg.ui.hud_label_color, COL_BLACK);
-            hal_draw_text(g_game_cfg.ui.hud_wave_x + label_w, 2, &buf[i], g_game_cfg.ui.hud_wave_value_color, COL_BLACK);
+            hal_draw_text(g_game_cfg.ui.hud_wave_x, 2, g_game_cfg.ui.hud_wave_label, hud_label_color, COL_BLACK);
+            hal_draw_text(g_game_cfg.ui.hud_wave_x + label_w, 2, &buf[i], hud_wave_value_color, COL_BLACK);
         }
     }
 
@@ -999,12 +1041,17 @@ void game_render(void) {
 
     /* ── Wave complete overlay ───────────────────────────────────────────── */
     if (gs.wave_complete && !gs.game_over) {
-        hal_draw_rect(60, 80, 200, 60, g_game_cfg.ui.overlay_bg_color);
+        hal_draw_rect(60, 80, 200, 60, overlay_bg_color);
 
         int title_len = (int)strlen(g_game_cfg.ui.wave_complete_title);
-        int title_w = (title_len > 0) ? (6 * title_len - 1) : 0;
+        int title_scale = alt_theme ? 2 : 1;
+        int title_w = (title_len > 0) ? ((6 * title_len - 1) * title_scale) : 0;
         int title_x = (SCREEN_W - title_w) / 2;
-        hal_draw_text(title_x, 88, g_game_cfg.ui.wave_complete_title, g_game_cfg.ui.wave_complete_title_color, COL_BLACK);
+        if (title_scale == 2) {
+            hal_draw_text_scaled(title_x, 86, g_game_cfg.ui.wave_complete_title, overlay_title_color, 2);
+        } else {
+            hal_draw_text(title_x, 88, g_game_cfg.ui.wave_complete_title, overlay_title_color, COL_BLACK);
+        }
         
         /* Display bonus */
         char buf[32];
@@ -1021,28 +1068,33 @@ void game_render(void) {
         int bonus_gap = 6; /* one character cell gap */
         int bonus_row_w = bonus_label_w + bonus_gap + bonus_value_w;
         int bonus_x = (SCREEN_W - bonus_row_w) / 2;
-        hal_draw_text(bonus_x, 102, g_game_cfg.ui.wave_complete_bonus_label, g_game_cfg.ui.wave_complete_bonus_label_color, COL_BLACK);
-        hal_draw_text(bonus_x + bonus_label_w + bonus_gap, 102, &buf[i], g_game_cfg.ui.wave_complete_bonus_value_color, COL_BLACK);
+        hal_draw_text(bonus_x, 102, g_game_cfg.ui.wave_complete_bonus_label, overlay_label_color, COL_BLACK);
+        hal_draw_text(bonus_x + bonus_label_w + bonus_gap, 102, &buf[i], overlay_value_color, COL_BLACK);
         
         int next_len = (int)strlen(g_game_cfg.ui.wave_complete_next_label);
         int next_w = (next_len > 0) ? (6 * next_len - 1) : 0;
         int next_x = (SCREEN_W - next_w) / 2;
-        hal_draw_text(next_x, 116, g_game_cfg.ui.wave_complete_next_label, g_game_cfg.ui.wave_complete_next_color, COL_BLACK);
+        hal_draw_text(next_x, 116, g_game_cfg.ui.wave_complete_next_label, overlay_next_color, COL_BLACK);
     }
     
     /* ── Game over overlay ───────────────────────────────────────────────── */
     if (gs.game_over) {
-        hal_draw_rect(80, 100, 160, 40, g_game_cfg.ui.overlay_bg_color);
+        hal_draw_rect(80, 100, 160, 40, overlay_bg_color);
 
         int title_len = (int)strlen(g_game_cfg.ui.game_over_title);
         int subtitle_len = (int)strlen(g_game_cfg.ui.game_over_subtitle);
-        int title_w = (title_len > 0) ? (6 * title_len - 1) : 0;
+        int title_scale = alt_theme ? 2 : 1;
+        int title_w = (title_len > 0) ? ((6 * title_len - 1) * title_scale) : 0;
         int subtitle_w = (subtitle_len > 0) ? (6 * subtitle_len - 1) : 0;
         int title_x = (SCREEN_W - title_w) / 2;
         int subtitle_x = (SCREEN_W - subtitle_w) / 2;
 
-        hal_draw_text(title_x, 108, g_game_cfg.ui.game_over_title, g_game_cfg.ui.game_over_title_color, COL_BLACK);
-        hal_draw_text(subtitle_x, 122, g_game_cfg.ui.game_over_subtitle, g_game_cfg.ui.game_over_subtitle_color, COL_BLACK);
+        if (title_scale == 2) {
+            hal_draw_text_scaled(title_x, 102, g_game_cfg.ui.game_over_title, game_over_title_color, 2);
+        } else {
+            hal_draw_text(title_x, 108, g_game_cfg.ui.game_over_title, game_over_title_color, COL_BLACK);
+        }
+        hal_draw_text(subtitle_x, 122, g_game_cfg.ui.game_over_subtitle, game_over_subtitle_color, COL_BLACK);
     }
 
     hal_present();

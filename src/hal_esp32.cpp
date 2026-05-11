@@ -1,3 +1,4 @@
+static bool          startup_wav_played = false;
 /**
  * hal_esp32.cpp — ESP32-S3 (Arduino/PlatformIO) implementation of hal.h
  *
@@ -23,14 +24,19 @@
 #include <SPIFFS.h>
 
 #include "game_config.h"
-#include "background-1.h"
-#include "civilian-target.h"
-#include "bunker-1.h"
+#include "default_background-1.h"
+#include "default_civilian-target.h"
+#include "default_bunker-1.h"
+#include "peppa_background-1.h"
+#include "peppa_civilian-target.h"
+#include "peppa_bunker-1.h"
 #include "explode_midi_piezo.h"
 #include "missile2_midi_piezo.h"
 #include "swoopup_midi_piezo.h"
 #include "alert_midi_piezo.h"
 #include "rollup_midi_piezo.h"
+
+static bool theme_is_alternate(void);
 
 #ifndef TFT_CS
 #define TFT_CS   10
@@ -199,16 +205,12 @@ static bool use_piezo = false;
 static const i2s_port_t   kI2SPort          = I2S_NUM_0;
 static const uint32_t     kI2SSampleRate     = 22050;
 static const size_t       kI2SFramesPerChunk = 256;
-static const char*        kLaunchWavFilename = "/outgoing-missile.wav";
-static const char*        kStartupWavFilename = "/startup.wav";
+static const char*        kDefaultLaunchWavFilename = "/default_outgoing-missile.wav";
+static const char*        kDefaultStartupWavFilename = "/default_startup.wav";
 static const int          kStartupSoundId     = 100;
 static const int          kMaxMixVoices      = 3;
 static QueueHandle_t      i2s_sound_queue    = nullptr;
 static bool               use_i2s_audio      = false;
-
-#ifndef CFG_STARTUP_WAV_DELAY_MS
-#define CFG_STARTUP_WAV_DELAY_MS 220
-#endif
 
 static void piezo_silence(void) {
     if (!use_piezo) {
@@ -241,7 +243,13 @@ static void piezo_play_pattern(int sound_id) {
     switch (sound_id) {
 #if CFG_SND_LAUNCH_EN
         case SND_LAUNCH:
-            piezo_play_sequence(missile2_midi_piezo, missile2_midi_piezo_count);
+            if (theme_is_alternate()) {
+                piezo_step(784, 40);
+                piezo_step(988, 35);
+                piezo_step(1318, 50);
+            } else {
+                piezo_play_sequence(missile2_midi_piezo, missile2_midi_piezo_count);
+            }
             break;
 #endif
 #if CFG_SND_PLAYER_BURST_EN
@@ -263,7 +271,13 @@ static void piezo_play_pattern(int sound_id) {
 #endif
 #if CFG_SND_ALERT_EN
         case SND_ALERT:
-            piezo_play_sequence(alert_midi_piezo, alert_midi_piezo_count);
+            if (theme_is_alternate()) {
+                piezo_step(1046, 35);
+                piezo_step(784, 45);
+                piezo_step(659, 60);
+            } else {
+                piezo_play_sequence(alert_midi_piezo, alert_midi_piezo_count);
+            }
             break;
 #endif
 #if CFG_SND_WAVE_COMPLETE_EN
@@ -297,13 +311,13 @@ static void piezo_task(void *) {
 
 static const char* i2s_sound_filename(int sound_id) {
     switch (sound_id) {
-        case SND_LAUNCH:        return kLaunchWavFilename;
-        case SND_PLAYER_BURST:  return "/swoop-up.wav";
+        case SND_LAUNCH:        return theme_is_alternate() ? "/peppa_incoming-missile.wav" : kDefaultLaunchWavFilename;
+        case SND_PLAYER_BURST:  return theme_is_alternate() ? "/peppa_swoop-up.wav" : "/default_swoop-up.wav";
         case SND_INTERCEPT:     return nullptr;  /* Disabled */
-        case SND_IMPACT:        return "/explode.wav";
-        case SND_ALERT:         return nullptr;  /* Disabled */
-        case SND_WAVE_COMPLETE: return "/roll-up.wav";
-        case SND_GAME_OVER:     return "/finale.wav";
+        case SND_IMPACT:        return theme_is_alternate() ? "/peppa_explode.wav" : "/default_explode.wav";
+        case SND_ALERT:         return theme_is_alternate() ? "/peppa_alert.wav" : nullptr;
+        case SND_WAVE_COMPLETE: return theme_is_alternate() ? "/peppa_roll-up.wav" : "/default_roll-up.wav";
+        case SND_GAME_OVER:     return theme_is_alternate() ? "/peppa_finale.wav" : "/default_finale.wav";
         default:                return nullptr;
     }
 }
@@ -332,12 +346,12 @@ struct I2SMixVoice {
 };
 
 static I2SCachedWav i2s_cached_wavs[] = {
-    { SND_LAUNCH,       kLaunchWavFilename, nullptr, 0, {0, 0, 0, 0}, false },
-    { SND_PLAYER_BURST, "/swoop-up.wav",   nullptr, 0, {0, 0, 0, 0}, false },
-    { SND_IMPACT,       "/explode.wav",    nullptr, 0, {0, 0, 0, 0}, false },
-    { SND_WAVE_COMPLETE, "/roll-up.wav",   nullptr, 0, {0, 0, 0, 0}, false },
-    { SND_GAME_OVER,    "/finale.wav",     nullptr, 0, {0, 0, 0, 0}, false },
-    { kStartupSoundId,  kStartupWavFilename, nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_LAUNCH,       kDefaultLaunchWavFilename, nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_PLAYER_BURST, "/default_swoop-up.wav",  nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_IMPACT,       "/default_explode.wav",   nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_WAVE_COMPLETE, "/default_roll-up.wav",  nullptr, 0, {0, 0, 0, 0}, false },
+    { SND_GAME_OVER,    "/default_finale.wav",    nullptr, 0, {0, 0, 0, 0}, false },
+    { kStartupSoundId,  kDefaultStartupWavFilename, nullptr, 0, {0, 0, 0, 0}, false },
 };
 static I2SMixVoice i2s_voices[kMaxMixVoices] = {};
 static int i2s_voice_replace_cursor = 0;
@@ -757,7 +771,21 @@ static void display_task(void *) {
 }
 
 /* ── Image assets exported as RGB565 arrays in PROGMEM ───────────────────── */
-static constexpr uint16_t TRANSPARENT_KEY = 0x0000;
+#ifndef ALT_THEME_POST_TINT
+#define ALT_THEME_POST_TINT 0
+#endif
+
+#ifndef SPRITE_TRANSPARENT_R
+#define SPRITE_TRANSPARENT_R 0
+#endif
+#ifndef SPRITE_TRANSPARENT_G
+#define SPRITE_TRANSPARENT_G 0
+#endif
+#ifndef SPRITE_TRANSPARENT_B
+#define SPRITE_TRANSPARENT_B 0
+#endif
+
+static constexpr uint16_t TRANSPARENT_KEY = RGB565(SPRITE_TRANSPARENT_R, SPRITE_TRANSPARENT_G, SPRITE_TRANSPARENT_B);
 static constexpr int BG_W = SCREEN_W;
 static constexpr int BG_H = SCREEN_H;
 static constexpr int CITY_SPRITE_W = 20;
@@ -767,12 +795,84 @@ static constexpr int BUNKER_SPRITE_H = 20;
 static constexpr int CITY_SPRITE_Y_OFFSET = 0;
 static constexpr int BUNKER_SPRITE_Y_OFFSET = 0;
 
-static_assert((int)(sizeof(background_1) / sizeof(background_1[0])) == BG_W * BG_H,
-              "background-1.h dimensions must be 320x240");
-static_assert((int)(sizeof(civilian_target) / sizeof(civilian_target[0])) == CITY_SPRITE_W * CITY_SPRITE_H,
-              "civilian-target.h dimensions must match CITY_SPRITE_W/H");
-static_assert((int)(sizeof(bunker_1) / sizeof(bunker_1[0])) == BUNKER_SPRITE_W * BUNKER_SPRITE_H,
-              "bunker-1.h dimensions must match BUNKER_SPRITE_W/H");
+static_assert((int)(sizeof(default_background_1) / sizeof(default_background_1[0])) == BG_W * BG_H,
+              "default_background-1.h dimensions must be 320x240");
+static_assert((int)(sizeof(peppa_background_1) / sizeof(peppa_background_1[0])) == BG_W * BG_H,
+              "peppa_background-1.h dimensions must be 320x240");
+static_assert((int)(sizeof(default_civilian_target) / sizeof(default_civilian_target[0])) == CITY_SPRITE_W * CITY_SPRITE_H,
+              "default_civilian-target.h dimensions must match CITY_SPRITE_W/H");
+static_assert((int)(sizeof(peppa_civilian_target) / sizeof(peppa_civilian_target[0])) == CITY_SPRITE_W * CITY_SPRITE_H,
+              "peppa_civilian-target.h dimensions must match CITY_SPRITE_W/H");
+static_assert((int)(sizeof(default_bunker_1) / sizeof(default_bunker_1[0])) == BUNKER_SPRITE_W * BUNKER_SPRITE_H,
+              "default_bunker-1.h dimensions must match BUNKER_SPRITE_W/H");
+static_assert((int)(sizeof(peppa_bunker_1) / sizeof(peppa_bunker_1[0])) == BUNKER_SPRITE_W * BUNKER_SPRITE_H,
+              "peppa_bunker-1.h dimensions must match BUNKER_SPRITE_W/H");
+
+static int current_theme_id = THEME_CLASSIC;
+
+static bool theme_is_alternate(void) {
+    return current_theme_id == THEME_ALTERNATE;
+}
+
+static uint16_t theme_background_pixel(uint16_t px) {
+    const uint8_t r8 = (uint8_t)(((px >> 11) & 0x1Fu) * 255u / 31u);
+    const uint8_t g8 = (uint8_t)(((px >> 5) & 0x3Fu) * 255u / 63u);
+    const uint8_t b8 = (uint8_t)((px & 0x1Fu) * 255u / 31u);
+    const uint8_t lum = (uint8_t)((r8 * 30u + g8 * 59u + b8 * 11u) / 100u);
+    const uint8_t out_r = (uint8_t)((lum / 5u) + 8u);
+    const uint8_t out_g = (uint8_t)((lum / 2u) + 16u);
+    const uint8_t out_b = (uint8_t)((lum * 4u / 5u) + 32u);
+    return RGB565(out_r, out_g, out_b);
+}
+
+static uint16_t theme_sprite_pixel(int sprite_id, uint16_t px) {
+    if (!theme_is_alternate() || px == TRANSPARENT_KEY || ALT_THEME_POST_TINT == 0) {
+        return px;
+    }
+
+    const uint8_t r8 = (uint8_t)(((px >> 11) & 0x1Fu) * 255u / 31u);
+    const uint8_t g8 = (uint8_t)(((px >> 5) & 0x3Fu) * 255u / 63u);
+    const uint8_t b8 = (uint8_t)((px & 0x1Fu) * 255u / 31u);
+    const uint8_t lum = (uint8_t)((r8 * 30u + g8 * 59u + b8 * 11u) / 100u);
+    const uint8_t boost = (uint8_t)(80u + (lum * 175u) / 255u);
+
+    uint8_t target_r = 64u;
+    uint8_t target_g = 192u;
+    uint8_t target_b = 255u;
+    if (sprite_id == SPRITE_BUNKER) {
+        target_r = 255u;
+        target_g = 160u;
+        target_b = 64u;
+    }
+
+    const uint8_t out_r = (uint8_t)((target_r * boost) / 255u);
+    const uint8_t out_g = (uint8_t)((target_g * boost) / 255u);
+    const uint8_t out_b = (uint8_t)((target_b * boost) / 255u);
+    return RGB565(out_r, out_g, out_b);
+}
+
+static void draw_theme_background(const uint16_t *img) {
+    if (!img) {
+        return;
+    }
+
+    if (use_backbuffer) {
+        uint16_t *dst = backbuffer->getBuffer();
+        if (!dst) {
+            return;
+        }
+        for (int i = 0; i < BG_W * BG_H; i++) {
+            dst[i] = theme_background_pixel(pgm_read_word(&img[i]));
+        }
+    } else {
+        for (int y = 0; y < BG_H; y++) {
+            for (int x = 0; x < BG_W; x++) {
+                const uint16_t px = theme_background_pixel(pgm_read_word(&img[y * BG_W + x]));
+                tft.drawPixel(x, y, px);
+            }
+        }
+    }
+}
 
 /* ── Timing ──────────────────────────────────────────────────────────────── */
 static uint32_t start_ms = 0;
@@ -929,8 +1029,8 @@ static void sample_cursor_once(void) {
 }
 
 static void draw_sprite_with_key(int cx, int y_bottom,
-                                 const uint16_t *sprite, int w, int h,
-                                 int y_offset) {
+                                 const uint16_t *sprite, int sprite_id,
+                                 int w, int h, int y_offset) {
     const int x0 = cx - (w / 2);
     const int y0 = (y_bottom + y_offset) - h;
 
@@ -940,15 +1040,16 @@ static void draw_sprite_with_key(int cx, int y_bottom,
             if (px == TRANSPARENT_KEY) {
                 continue;
             }
+            const uint16_t themed_px = theme_sprite_pixel(sprite_id, px);
             const int x = x0 + col;
             const int y = y0 + row;
             if (x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H) {
                 continue;
             }
             if (use_backbuffer) {
-                backbuffer->drawPixel(x, y, px);
+                backbuffer->drawPixel(x, y, themed_px);
             } else {
-                tft.drawPixel(x, y, px);
+                tft.drawPixel(x, y, themed_px);
             }
         }
     }
@@ -973,7 +1074,7 @@ void hal_init(void) {
         /* This never touches internal SRAM so it cannot cause an OOM reboot.  */
         disp_psram = (uint16_t *)ps_malloc(SCREEN_W * SCREEN_H * sizeof(uint16_t));
         if (disp_psram != nullptr) {
-            memcpy(disp_psram, background_1, BG_W * BG_H * sizeof(uint16_t));
+            memcpy(disp_psram, default_background_1, BG_W * BG_H * sizeof(uint16_t));
             sem_frame_ready = xSemaphoreCreateBinary();
             sem_blit_done   = xSemaphoreCreateBinary();
             xSemaphoreGive(sem_blit_done);  /* let first hal_present() proceed */
@@ -1059,13 +1160,6 @@ void hal_init(void) {
                 Serial.printf("[HAL] I2S audio: BCLK=%d LRCLK=%d DOUT=%d AMP_SD=%d\n",
                               I2S_BCLK_PIN, I2S_LRCLK_PIN, I2S_DOUT_PIN, AMP_SD_PIN);
 
-                /* Let amp and clocks settle before startup audio. */
-                delay(CFG_STARTUP_WAV_DELAY_MS);
-                Serial.printf("[HAL] Playing startup WAV: %s\n", kStartupWavFilename);
-                if (!i2s_play_cached_sound_blocking(kStartupSoundId)) {
-                    i2s_stream_named_file(kStartupWavFilename);
-                }
-
                 xTaskCreatePinnedToCore(i2s_audio_task, "i2s_audio",
                                         4096, nullptr, 3, nullptr, 1);
                 use_i2s_audio = true;
@@ -1087,12 +1181,28 @@ void hal_init(void) {
 }
 
 void hal_clear(uint16_t color) {
+    const uint16_t *bg = theme_is_alternate() ? peppa_background_1 : default_background_1;
     if (use_backbuffer) {
         (void)color;
-        memcpy(backbuffer->getBuffer(), background_1, BG_W * BG_H * sizeof(uint16_t));
+        memcpy(backbuffer->getBuffer(), bg, BG_W * BG_H * sizeof(uint16_t));
     } else {
         (void)color;
-        tft.drawRGBBitmap(0, 0, background_1, BG_W, BG_H);
+        tft.drawRGBBitmap(0, 0, bg, BG_W, BG_H);
+    }
+}
+
+void hal_draw_rgb565_background(const uint16_t *img) {
+    if (!img) {
+        return;
+    }
+    if (theme_is_alternate() && ALT_THEME_POST_TINT != 0) {
+        draw_theme_background(img);
+        return;
+    }
+    if (use_backbuffer) {
+        memcpy(backbuffer->getBuffer(), img, BG_W * BG_H * sizeof(uint16_t));
+    } else {
+        tft.drawRGBBitmap(0, 0, img, BG_W, BG_H);
     }
 }
 
@@ -1281,19 +1391,29 @@ void hal_delay_ms(uint32_t ms) {
     delay(ms);
 }
 
+void hal_set_theme(int theme_id) {
+    current_theme_id = (theme_id == THEME_ALTERNATE) ? THEME_ALTERNATE : THEME_CLASSIC;
+}
+
+int hal_get_theme(void) {
+    return current_theme_id;
+}
+
 void hal_draw_ground(void) {
     if (use_backbuffer) backbuffer->fillRect(0, SCREEN_H - 14, SCREEN_W, 14, g_game_cfg.ui.ground_color);
     else                tft.fillRect(0, SCREEN_H - 14, SCREEN_W, 14, g_game_cfg.ui.ground_color);
 }
 
 void hal_draw_sprite(int cx, int y_bottom, int sprite_id) {
+    const uint16_t *city = theme_is_alternate() ? peppa_civilian_target : default_civilian_target;
+    const uint16_t *bunker = theme_is_alternate() ? peppa_bunker_1 : default_bunker_1;
     if (sprite_id == SPRITE_CITY) {
         draw_sprite_with_key(cx, y_bottom,
-                             civilian_target, CITY_SPRITE_W, CITY_SPRITE_H,
+                             city, SPRITE_CITY, CITY_SPRITE_W, CITY_SPRITE_H,
                              CITY_SPRITE_Y_OFFSET);
     } else if (sprite_id == SPRITE_BUNKER) {
         draw_sprite_with_key(cx, y_bottom,
-                             bunker_1, BUNKER_SPRITE_W, BUNKER_SPRITE_H,
+                             bunker, SPRITE_BUNKER, BUNKER_SPRITE_W, BUNKER_SPRITE_H,
                              BUNKER_SPRITE_Y_OFFSET);
     }
 }
@@ -1333,6 +1453,38 @@ void hal_play_sound(int sound_id) {
         return;
     }
     (void)xQueueSend(sound_queue, &sound_id, 0);
+}
+
+void hal_play_startup_wav_once(void) {
+    if (startup_wav_played) {
+        return;
+    }
+    startup_wav_played = true;
+
+    if (!use_i2s_audio || i2s_sound_queue == nullptr) {
+        return;
+    }
+
+    /* Trigger only after the startup screen has been presented once. */
+    const char *startup_file = theme_is_alternate() ? "/peppa_startup.wav" : kDefaultStartupWavFilename;
+    I2SCachedWav* startup_slot = i2s_find_cached_slot(kStartupSoundId);
+    if (startup_slot != nullptr && strcmp(startup_slot->filename, startup_file) != 0) {
+        if (startup_slot->data != nullptr) {
+            heap_caps_free(startup_slot->data);
+        }
+        startup_slot->filename = startup_file;
+        startup_slot->data = nullptr;
+        startup_slot->data_size = 0;
+        memset(&startup_slot->hdr, 0, sizeof(startup_slot->hdr));
+        startup_slot->loaded = false;
+    }
+    if (startup_slot != nullptr && !startup_slot->loaded) {
+        (void)i2s_try_cache_sound(*startup_slot);
+    }
+
+    Serial.printf("[HAL] Playing startup WAV: %s\n", startup_file);
+    const int sid = kStartupSoundId;
+    (void)xQueueSendToFront(i2s_sound_queue, &sid, 0);
 }
 
 } /* extern "C" */
