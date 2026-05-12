@@ -316,20 +316,39 @@ static int demo_total_ammo(void) {
     return total;
 }
 
-static int demo_is_target_already_covered(int x, int y) {
-    if (point_in_explosion(x, y)) return 1;
+/* Coverage radii tuned to avoid duplicate shots while still allowing
+   nearby-but-distinct threats to be engaged separately. */
+#define DEMO_EXPLOSION_COVER_RADIUS_PX 28
+#define DEMO_MISSILE_COVER_RADIUS_PX   30
+
+static int demo_count_target_cover(int x, int y) {
+    int cover = 0;
+
+    for (int i = 0; i < MAX_EXPLOSIONS; i++) {
+        Explosion *e = &gs.explosions[i];
+        if (!e->active) continue;
+        int dx = e->x - x;
+        int dy = e->y - y;
+        if (dx * dx + dy * dy <= (DEMO_EXPLOSION_COVER_RADIUS_PX * DEMO_EXPLOSION_COVER_RADIUS_PX)) {
+            cover++;
+        }
+    }
 
     for (int i = 0; i < MAX_PLAYER_MISSILES; i++) {
         Missile *m = &gs.players[i];
         if (!m->active) continue;
         int dx = m->tx - x;
         int dy = m->ty - y;
-        if (dx < 0) dx = -dx;
-        if (dy < 0) dy = -dy;
-        if (dx <= 16 && dy <= 16) return 1;
+        if (dx * dx + dy * dy <= (DEMO_MISSILE_COVER_RADIUS_PX * DEMO_MISSILE_COVER_RADIUS_PX)) {
+            cover++;
+        }
     }
 
-    return 0;
+    return cover;
+}
+
+static int demo_is_target_already_covered(int x, int y) {
+    return demo_count_target_cover(x, y) > 0;
 }
 
 static int demo_target_threat_score(const Missile *m) {
@@ -575,11 +594,15 @@ int game_update(uint32_t delta_ms) {
         if (gs.demo_fire_cooldown_ms == 0 && has_target) {
             int usable_batteries = demo_count_usable_batteries();
             int ammo_total = demo_total_ammo();
+            int target_cover = demo_count_target_cover(tx, ty);
 
             int should_fire = 1;
             if (usable_batteries <= 0 || ammo_total <= 0) {
                 should_fire = 0;
             }
+
+            /* One-shot cover rule: if a target point already has cover, skip. */
+            if (target_cover >= 1) should_fire = 0;
 
             if (shot_score < 90) should_fire = 0;
             if (ammo_total < 3 && shot_score < 260) should_fire = 0;

@@ -39,6 +39,7 @@ static int prev_mouse_cursor_y = SCREEN_H / 2;
 static int pending_game_startup_wav = 0;
 static int waiting_for_startup_wav = 0;
 static uint32_t startup_wav_wait_started_ms = 0;
+static int last_non_demo_theme = THEME_ALTERNATE;
 
 enum AppMode {
     APP_MENU = 0,
@@ -185,9 +186,21 @@ static void update_start_menu(uint32_t now) {
             prev_mouse_cursor_y = hal_read_cursor_y();
             calibrate_mouse_joystick_center();
         } else {
-            const int selected_theme = (menu_selected == MENU_PLAY_THEME_2) ? THEME_ALTERNATE : THEME_CLASSIC;
+            const int is_demo = (menu_selected == MENU_DEMO_MODE);
+            int selected_theme = THEME_CLASSIC;
+            if (menu_selected == MENU_PLAY_THEME_2) {
+                selected_theme = THEME_ALTERNATE;
+            } else if (menu_selected == MENU_PLAY_CLASSIC) {
+                selected_theme = THEME_CLASSIC;
+            } else if (is_demo) {
+                selected_theme = last_non_demo_theme;
+            }
+
+            if (!is_demo) {
+                last_non_demo_theme = selected_theme;
+            }
             hal_set_theme(selected_theme);
-            game_set_demo_mode(menu_selected == MENU_DEMO_MODE);
+            game_set_demo_mode(is_demo);
             game_init();
             hal_reset_startup_wav_once();
             pending_game_startup_wav = 1;
@@ -196,6 +209,9 @@ static void update_start_menu(uint32_t now) {
             last_ticks = hal_ticks_ms();
             app_mode = APP_GAME;
         }
+
+        prev_menu_buttons = buttons;
+        return;
     }
 
     prev_menu_buttons = buttons;
