@@ -867,12 +867,13 @@ void game_render(void) {
     const uint16_t game_over_subtitle_color = theme_color(g_game_cfg.ui.game_over_subtitle_color, COL_WHITE);
 
     const uint8_t enemy_trail_lead_r = alt_theme ? 255u : g_game_cfg.trail.lead_r;
-    const uint8_t enemy_trail_lead_g = alt_theme ? 64u  : g_game_cfg.trail.lead_g;
+    const uint8_t enemy_trail_lead_g = alt_theme ? 255u : g_game_cfg.trail.lead_g;
     const uint8_t enemy_trail_lead_b = alt_theme ? 255u : g_game_cfg.trail.lead_b;
-    const uint8_t enemy_trail_tail_r = alt_theme ? 32u  : g_game_cfg.trail.tail_r;
-    const uint8_t enemy_trail_tail_g = alt_theme ? 0u   : g_game_cfg.trail.tail_g;
-    const uint8_t enemy_trail_tail_b = alt_theme ? 64u  : g_game_cfg.trail.tail_b;
-    const uint16_t enemy_tip_color = alt_theme ? COL_CYAN : g_game_cfg.trail.tip_color;
+    const uint8_t enemy_trail_tail_r = alt_theme ? 135u : g_game_cfg.trail.tail_r;
+    const uint8_t enemy_trail_tail_g = alt_theme ? 206u : g_game_cfg.trail.tail_g;
+    const uint8_t enemy_trail_tail_b = alt_theme ? 235u : g_game_cfg.trail.tail_b;
+    const uint16_t enemy_tip_color = alt_theme ? RGB565(135u, 206u, 235u) : g_game_cfg.trail.tip_color;
+    const int enemy_tip_radius = alt_theme ? 3 : 0;
 
     const uint8_t player_trail_lead_r = alt_theme ? 255u : g_game_cfg.trail.player_lead_r;
     const uint8_t player_trail_lead_g = alt_theme ? 220u : g_game_cfg.trail.player_lead_g;
@@ -967,7 +968,11 @@ void game_render(void) {
             }
         }
         if (py >= g_game_cfg.trail.enemy_render_min_y) {
-            hal_draw_pixel(px, py, enemy_tip_color);
+            if (enemy_tip_radius > 0) {
+                hal_draw_circle(px, py, enemy_tip_radius, enemy_tip_color);
+            } else {
+                hal_draw_pixel(px, py, enemy_tip_color);
+            }
         }
     }
 

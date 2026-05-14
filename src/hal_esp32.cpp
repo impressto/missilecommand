@@ -313,12 +313,12 @@ static void piezo_task(void *) {
 
 static const char* i2s_sound_filename(int sound_id) {
     switch (sound_id) {
-        case SND_LAUNCH:        return theme_is_alternate() ? "/peppa_incoming-missile.wav" : kDefaultLaunchWavFilename;
+        case SND_LAUNCH:        return theme_is_alternate() ? "/peppa_outgoing-missile.wav" : kDefaultLaunchWavFilename;
         case kStartupSoundId:   return theme_is_alternate() ? "/peppa_startup.wav" : kDefaultStartupWavFilename;
         case SND_PLAYER_BURST:  return theme_is_alternate() ? "/peppa_swoop-up.wav" : "/default_swoop-up.wav";
         case SND_INTERCEPT:     return nullptr;  /* Disabled */
         case SND_IMPACT:        return theme_is_alternate() ? "/peppa_explode.wav" : "/default_explode.wav";
-        case SND_ALERT:         return theme_is_alternate() ? "/peppa_alert.wav" : nullptr;
+        case SND_ALERT:         return theme_is_alternate() ? "/peppa_incoming-missile.wav" : nullptr;
         case SND_WAVE_COMPLETE: return theme_is_alternate() ? "/peppa_roll-up.wav" : "/default_roll-up.wav";
         case SND_GAME_OVER:     return theme_is_alternate() ? "/peppa_finale.wav" : "/default_finale.wav";
         default:                return nullptr;
