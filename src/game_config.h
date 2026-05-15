@@ -81,11 +81,52 @@ typedef struct {
 } AudioConfig;
 
 typedef struct {
+    uint16_t hud_label_color;
+    uint16_t hud_score_value_color;
+    uint16_t hud_wave_value_color;
+    uint16_t crosshair_color;
+    uint16_t crosshair_center_color;
+    uint16_t star_color;
+    uint16_t ammo_color;
+    uint16_t overlay_bg_color;
+    uint16_t overlay_title_color;
+    uint16_t overlay_label_color;
+    uint16_t overlay_value_color;
+    uint16_t overlay_next_color;
+    uint16_t game_over_title_color;
+    uint16_t game_over_subtitle_color;
+
+    uint8_t enemy_trail_lead_r;
+    uint8_t enemy_trail_lead_g;
+    uint8_t enemy_trail_lead_b;
+    uint8_t enemy_trail_tail_r;
+    uint8_t enemy_trail_tail_g;
+    uint8_t enemy_trail_tail_b;
+    uint16_t enemy_tip_color;
+    int enemy_tip_radius;
+
+    uint8_t player_trail_lead_r;
+    uint8_t player_trail_lead_g;
+    uint8_t player_trail_lead_b;
+    uint8_t player_trail_tail_r;
+    uint8_t player_trail_tail_g;
+    uint8_t player_trail_tail_b;
+    uint16_t player_missile_main_color;
+    uint16_t player_missile_shadow_color;
+} ThemeRenderConfig;
+
+typedef struct {
+    ThemeRenderConfig classic;
+    ThemeRenderConfig alternate;
+} ThemeConfig;
+
+typedef struct {
     ExplosionConfig explosion;
     TrailConfig trail;
     AmmoConfig ammo;
     UiConfig ui;
     AudioConfig audio;
+    ThemeConfig theme;
 } GameConfig;
 
 extern const GameConfig g_game_cfg;

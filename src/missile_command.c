@@ -841,48 +841,48 @@ static int theme_is_alternate(void) {
     return hal_get_theme() == THEME_ALTERNATE;
 }
 
-static uint16_t theme_color(uint16_t classic_color, uint16_t alternate_color) {
-    return theme_is_alternate() ? alternate_color : classic_color;
-}
-
 void game_render(void) {
     /* ── Background ──────────────────────────────────────────────────────── */
     hal_clear(COL_BLACK);
 
     const int alt_theme = theme_is_alternate();
 
-    const uint16_t hud_label_color = theme_color(g_game_cfg.ui.hud_label_color, COL_CYAN);
-    const uint16_t hud_score_value_color = theme_color(g_game_cfg.ui.hud_score_value_color, COL_ORANGE);
-    const uint16_t hud_wave_value_color = theme_color(g_game_cfg.ui.hud_wave_value_color, COL_YELLOW);
-    const uint16_t crosshair_color = theme_color(g_game_cfg.ui.crosshair_color, COL_CYAN);
-    const uint16_t crosshair_center_color = theme_color(g_game_cfg.ui.crosshair_center_color, COL_ORANGE);
-    const uint16_t star_color = theme_color(g_game_cfg.ui.star_color, COL_BLUE);
-    const uint16_t ammo_color = theme_color(g_game_cfg.ammo.indicator_color, COL_ORANGE);
-    const uint16_t overlay_bg_color = theme_color(g_game_cfg.ui.overlay_bg_color, COL_DKBLUE);
-    const uint16_t overlay_title_color = theme_color(g_game_cfg.ui.wave_complete_title_color, COL_ORANGE);
-    const uint16_t overlay_label_color = theme_color(g_game_cfg.ui.wave_complete_bonus_label_color, COL_CYAN);
-    const uint16_t overlay_value_color = theme_color(g_game_cfg.ui.wave_complete_bonus_value_color, COL_YELLOW);
-    const uint16_t overlay_next_color = theme_color(g_game_cfg.ui.wave_complete_next_color, COL_GREEN);
-    const uint16_t game_over_title_color = theme_color(g_game_cfg.ui.game_over_title_color, COL_ORANGE);
-    const uint16_t game_over_subtitle_color = theme_color(g_game_cfg.ui.game_over_subtitle_color, COL_WHITE);
+    const ThemeRenderConfig *theme_cfg = alt_theme
+        ? &g_game_cfg.theme.alternate
+        : &g_game_cfg.theme.classic;
 
-    const uint8_t enemy_trail_lead_r = alt_theme ? 255u : g_game_cfg.trail.lead_r;
-    const uint8_t enemy_trail_lead_g = alt_theme ? 255u : g_game_cfg.trail.lead_g;
-    const uint8_t enemy_trail_lead_b = alt_theme ? 255u : g_game_cfg.trail.lead_b;
-    const uint8_t enemy_trail_tail_r = alt_theme ? 135u : g_game_cfg.trail.tail_r;
-    const uint8_t enemy_trail_tail_g = alt_theme ? 206u : g_game_cfg.trail.tail_g;
-    const uint8_t enemy_trail_tail_b = alt_theme ? 235u : g_game_cfg.trail.tail_b;
-    const uint16_t enemy_tip_color = alt_theme ? RGB565(135u, 206u, 235u) : g_game_cfg.trail.tip_color;
-    const int enemy_tip_radius = alt_theme ? 3 : 0;
+    const uint16_t hud_label_color = theme_cfg->hud_label_color;
+    const uint16_t hud_score_value_color = theme_cfg->hud_score_value_color;
+    const uint16_t hud_wave_value_color = theme_cfg->hud_wave_value_color;
+    const uint16_t crosshair_color = theme_cfg->crosshair_color;
+    const uint16_t crosshair_center_color = theme_cfg->crosshair_center_color;
+    const uint16_t star_color = theme_cfg->star_color;
+    const uint16_t ammo_color = theme_cfg->ammo_color;
+    const uint16_t overlay_bg_color = theme_cfg->overlay_bg_color;
+    const uint16_t overlay_title_color = theme_cfg->overlay_title_color;
+    const uint16_t overlay_label_color = theme_cfg->overlay_label_color;
+    const uint16_t overlay_value_color = theme_cfg->overlay_value_color;
+    const uint16_t overlay_next_color = theme_cfg->overlay_next_color;
+    const uint16_t game_over_title_color = theme_cfg->game_over_title_color;
+    const uint16_t game_over_subtitle_color = theme_cfg->game_over_subtitle_color;
 
-    const uint8_t player_trail_lead_r = alt_theme ? 255u : g_game_cfg.trail.player_lead_r;
-    const uint8_t player_trail_lead_g = alt_theme ? 220u : g_game_cfg.trail.player_lead_g;
-    const uint8_t player_trail_lead_b = alt_theme ? 120u : g_game_cfg.trail.player_lead_b;
-    const uint8_t player_trail_tail_r = alt_theme ? 96u  : g_game_cfg.trail.player_tail_r;
-    const uint8_t player_trail_tail_g = alt_theme ? 40u  : g_game_cfg.trail.player_tail_g;
-    const uint8_t player_trail_tail_b = alt_theme ? 8u   : g_game_cfg.trail.player_tail_b;
-    const uint16_t player_missile_main_color = alt_theme ? COL_ORANGE : g_game_cfg.ui.player_missile_main_color;
-    const uint16_t player_missile_shadow_color = alt_theme ? COL_YELLOW : g_game_cfg.ui.player_missile_shadow_color;
+    const uint8_t enemy_trail_lead_r = theme_cfg->enemy_trail_lead_r;
+    const uint8_t enemy_trail_lead_g = theme_cfg->enemy_trail_lead_g;
+    const uint8_t enemy_trail_lead_b = theme_cfg->enemy_trail_lead_b;
+    const uint8_t enemy_trail_tail_r = theme_cfg->enemy_trail_tail_r;
+    const uint8_t enemy_trail_tail_g = theme_cfg->enemy_trail_tail_g;
+    const uint8_t enemy_trail_tail_b = theme_cfg->enemy_trail_tail_b;
+    const uint16_t enemy_tip_color = theme_cfg->enemy_tip_color;
+    const int enemy_tip_radius = theme_cfg->enemy_tip_radius;
+
+    const uint8_t player_trail_lead_r = theme_cfg->player_trail_lead_r;
+    const uint8_t player_trail_lead_g = theme_cfg->player_trail_lead_g;
+    const uint8_t player_trail_lead_b = theme_cfg->player_trail_lead_b;
+    const uint8_t player_trail_tail_r = theme_cfg->player_trail_tail_r;
+    const uint8_t player_trail_tail_g = theme_cfg->player_trail_tail_g;
+    const uint8_t player_trail_tail_b = theme_cfg->player_trail_tail_b;
+    const uint16_t player_missile_main_color = theme_cfg->player_missile_main_color;
+    const uint16_t player_missile_shadow_color = theme_cfg->player_missile_shadow_color;
 
     /* ── Stars (deterministic, based on position) ────────────────────────── */
     /* A handful of fixed star positions to avoid rand() per frame */

@@ -109,16 +109,17 @@ static void draw_text_scaled_centered(int y, const char *str, uint16_t color, in
 
 static void draw_start_menu() {
     const int theme2_preview = (menu_selected == MENU_PLAY_THEME_2);
+    const uint16_t peppa_pink = RGB565(255, 105, 180);
     hal_set_theme(theme2_preview ? THEME_ALTERNATE : THEME_CLASSIC);
     hal_draw_rgb565_background(theme2_preview ? peppa_startmenu_background_1 : default_startmenu_background_1);
 
     const uint16_t classic_col = (menu_selected == MENU_PLAY_CLASSIC) ? COL_GREEN : COL_WHITE;
-    const uint16_t theme2_col = (menu_selected == MENU_PLAY_THEME_2) ? COL_ORANGE : COL_WHITE;
+    const uint16_t theme2_col = peppa_pink;
     const uint16_t demo_col = (menu_selected == MENU_DEMO_MODE) ? COL_YELLOW : COL_WHITE;
     const uint16_t mouse_col = (menu_selected == MENU_MOUSE_MODE) ? COL_CYAN : COL_WHITE;
 
     if (theme2_preview) {
-        draw_text_scaled_centered(114, "THEME 2", COL_ORANGE, 2);
+        draw_text_scaled_centered(114, "THEME 2", peppa_pink, 1);
         draw_text_centered(132, "NEON ASSAULT PROFILE", COL_CYAN, COL_BLACK);
         draw_text_centered(148, (menu_selected == MENU_PLAY_CLASSIC) ? "> PLAY CLASSIC" : "  PLAY CLASSIC", classic_col, COL_BLACK);
         draw_text_scaled_centered(162, (menu_selected == MENU_PLAY_THEME_2) ? "> PLAY THEME 2" : "  PLAY THEME 2", theme2_col, 2);
