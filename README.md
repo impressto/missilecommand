@@ -1,83 +1,85 @@
-# Missile Command on ESP32-S3 + ST7789V
+# Missile Command on ESP32-S3
 
 <img width="1600" height="1139" alt="overview" src="https://github.com/user-attachments/assets/724ff416-901e-45b8-a31b-06c41ccd0f87" />
 
+This project is a classroom-friendly version of Missile Command for an ESP32-S3 microcontroller. Students can use it to practice wiring, reading inputs, sending graphics to a display, and optionally playing sound.
 
-This folder contains the ESP32 target for Missile Command.
+The default settings in this folder match the pin choices in `platformio.ini` and `src/hal_esp32.cpp`.
 
-The default pin mapping matches the current values in `platformio.ini` and `src/hal_esp32.cpp`.
+## What Students Will Learn
 
-## Hardware
+- How a microcontroller talks to a screen over SPI
+- How a joystick or buttons become game controls
+- How a game can store images and sound files separately from the code
+- How to build firmware and upload it to a real device
 
-- MCU: ESP32-S3 DevKitC-1
-- Display: ST7789V SPI TFT (240x320)
-- Display mode: rotated to landscape (game renders at 320x240)
+## Parts Used
 
-## Image Assets (ESP32)
+- ESP32-S3 DevKitC-1
+- ST7789V SPI TFT display, 240 x 320
+- Optional: dual-axis joystick
+- Optional: MAX98357A I2S audio amplifier and speaker
 
-The ESP32 renderer now uses the three image headers in `src/`:
+## How The Game Fits Together
+
+The game runs in landscape mode, so the display is rotated to fit a 320 x 240 play area.
+
+The ESP32 version uses image files that have been converted into C headers inside `src/`:
 
 - `background-1.h`
 - `civilian-target.h`
 - `bunker-1.h`
 
-Expected RGB565 dimensions:
+These are RGB565 images. Black pixels are treated as transparent, so they do not get drawn.
 
-| Asset | Pixels | Notes |
-|---|---:|---|
-| `background-1.h` | 320x240 | Full-screen background, drawn in `hal_clear()` |
-| `civilian-target.h` | 20x20 | Drawn centered on city position |
-| `bunker-1.h` | 32x20 | Drawn centered on battery position |
+## Wiring Guide
 
-Transparency key for sprites is `0x0000` (pure black in RGB565), which is skipped during drawing.
+If you are building this in class, wire the display first, then add controls, then add audio if your teacher wants the extension activity.
 
-## Wiring (default)
+### Display
 
 | ST7789V Pin | ESP32-S3 Pin | Notes |
 |---|---:|---|
-| VCC | 3V3 | Use 3.3V logic display module |
+| VCC | 3V3 | Use a 3.3V display module |
 | GND | GND | Common ground |
-| SCL / SCK / CLK | GPIO12 | SPI clock (`TFT_SCLK`) |
-| SDA / MOSI / DIN | GPIO11 | SPI MOSI (`TFT_MOSI`) |
-| CS | GPIO10 | Chip select (`TFT_CS`) |
-| DC / A0 | GPIO9 | Data/command (`TFT_DC`) |
-| RST / RES | GPIO13 | Reset (`TFT_RST`) |
-| BL / LED | GPIO8 | Backlight enable (`TFT_BL`) |
-| MISO / SDO | Not connected | Not required for this project |
+| SCL / SCK / CLK | GPIO12 | SPI clock |
+| SDA / MOSI / DIN | GPIO11 | SPI data |
+| CS | GPIO10 | Chip select |
+| DC / A0 | GPIO9 | Data or command |
+| RST / RES | GPIO13 | Reset |
+| BL / LED | GPIO8 | Backlight |
+| MISO / SDO | Not connected | Not used |
 
-## Joystick Wiring (Dual-axis XY, 5-pin)
+### Joystick
 
-Example mapping for a common module labeled `GND`, `+5V`, `VRx`, `VRy`, `SW`:
+A common joystick module has pins labeled GND, +5V, VRx, VRy, and SW.
 
 | Joystick Pin | ESP32-S3 Pin | Notes |
 |---|---:|---|
 | GND | GND | Common ground |
-| +5V | 3V3 | Power from 3.3V on ESP32-S3 |
-| VRx | GPIO4 | X-axis analog input (`JOY_X_PIN`) |
-| VRy | GPIO5 | Y-axis analog input (`JOY_Y_PIN`) |
-| SW | GPIO7 | Optional push switch, active-low (`FIRE_PIN`) |
+| +5V | 3V3 | Power from the ESP32-S3 |
+| VRx | GPIO4 | Horizontal movement |
+| VRy | GPIO5 | Vertical movement |
+| SW | GPIO7 | Optional fire button |
 
-## MAX98357A I2S Audio Amplifier (optional)
+### Optional Audio
 
-To enable WAV audio playback of game sounds:
+The MAX98357A board can play the game sounds through a speaker.
 
-| MAX98357A Pin | ESP32-S3 Pin | Signal | Notes |
-|---|---:|---|---|
-| VIN | 5V | Power | 5V gives more output power than 3.3V |
-| GND | GND | Ground | Common ground with ESP32 |
-| BCLK | GPIO47 | I2S bit clock | (`I2S_BCLK_PIN`) |
-| LRC / WS | GPIO45 | I2S left/right clock | (`I2S_LRCLK_PIN`) |
-| DIN | GPIO38 | I2S data output | (`I2S_DOUT_PIN`) — GPIO48 is RGB LED |
-| SD | GPIO21 | Shutdown/mute | Optional; tie SD high on board to omit (`AMP_SD_PIN`) |
-| GAIN | — | Gain select | Leave at module default (or configure per datasheet) |
-| SPK+ | Speaker+ | — | Connect to speaker positive terminal |
-| SPK- | Speaker- | — | Connect to speaker negative terminal |
+| MAX98357A Pin | ESP32-S3 Pin | Notes |
+|---|---:|---|
+| VIN | 5V | More speaker power than 3.3V |
+| GND | GND | Common ground |
+| BCLK | GPIO47 | I2S clock |
+| LRC / WS | GPIO45 | I2S word select |
+| DIN | GPIO38 | I2S data |
+| SD | GPIO21 | Optional enable or mute |
+| SPK+ | Speaker + | Speaker output |
+| SPK- | Speaker - | Speaker output |
 
-WAV files are stored in SPIFFS. Upload them with `pio run -t uploadfs` (see `data/README.md`)
+Sound files are stored in SPIFFS. Upload them separately from the firmware using `uploadfs`.
 
-WAV playback volume can be adjusted at compile time with `CFG_WAV_MASTER_GAIN` (range `0-255`) in `platformio.ini` build flags.
-
-## Wiring Diagram
+## Quick Wiring Diagram
 
 ```text
 ESP32-S3 DevKitC-1                     ST7789V TFT
@@ -92,37 +94,33 @@ GPIO13 (RST)  ------------------------> RST / RES
 GPIO8  (BL)   ------------------------> BL / LED
 
 
-ESP32-S3 DevKitC-1                     XY Joystick Module (5-pin)
---------------------                   --------------------------
+ESP32-S3 DevKitC-1                     XY Joystick Module
+--------------------                   -------------------
 GND   --------------------------------> GND
-3V3   --------------------------------> +5V (VCC)
+3V3   --------------------------------> +5V
 GPIO4 (ADC, X) -----------------------> VRx
 GPIO5 (ADC, Y) -----------------------> VRy
 GPIO7 (SW)    ------------------------> SW
 
 
-ESP32-S3 DevKitC-1                     MAX98357A Amplifier (optional audio)
---------------------                   ------------------------------------
+ESP32-S3 DevKitC-1                     MAX98357A Amplifier (optional)
+--------------------                   ------------------------------
 5V    --------------------------------> VIN
 GND   --------------------------------> GND
 GPIO47 (I2S_BCLK) --------------------> BCLK
 GPIO45 (I2S_LRCLK) -------------------> LRC / WS
 GPIO38 (I2S_DOUT) --------------------> DIN
-GPIO21 (AMP_SD) ----------------------> SD (optional mute control)
+GPIO21 (AMP_SD) ----------------------> SD
 
 MAX98357A SPK+ -----------------------> Speaker +
 MAX98357A SPK- -----------------------> Speaker -
 ```
 
-## Options
-Current defaults disable controls (all `-1` in `build_flags`).
+## Before You Build
 
-If you wire controls, set these in `platformio.ini`:
+The default configuration leaves the controls disabled until you choose the pins in `platformio.ini`.
 
-- `JOY_X_PIN` and `JOY_Y_PIN` for analog joystick axes
-- `LEFT_PIN`, `RIGHT_PIN`, `FIRE_PIN` for active-low buttons
-
-For the joystick mapping above, use:
+Use these settings for the joystick shown above:
 
 ```ini
 -DJOY_X_PIN=4
@@ -130,49 +128,61 @@ For the joystick mapping above, use:
 -DFIRE_PIN=7
 ```
 
-## Build
+If you want left and right buttons instead of a joystick, set `LEFT_PIN`, `RIGHT_PIN`, and `FIRE_PIN`.
 
-From this folder:
+## Build The Project
 
-```sh
-pio run
-```
-
-If `pio` is not installed yet, install PlatformIO Core first:
+From this folder, use the local PlatformIO binary:
 
 ```sh
-python3 -m pip install --user platformio
+~/.platformio/penv/bin/pio run
 ```
 
-Then add `~/.local/bin` to your `PATH` if needed.
+If you are using VS Code, the PlatformIO Build task does the same thing.
 
-## Upload
+## Upload To The Board
 
-### 1. Upload Firmware
-
-Flash the compiled firmware to the ESP32-S3:
+### 1. Upload The Firmware
 
 ```sh
 ~/.platformio/penv/bin/pio run -t upload
 ```
 
-Hold the **BOOT** button while tapping **RESET** if the upload fails to connect.
+If the upload does not connect, hold BOOT while tapping RESET on the board.
 
-### 2. Upload WAV Files to SPIFFS
+### 2. Upload Sound Files
 
-The game sounds are stored as WAV files in the ESP32's SPIFFS filesystem partition (7 MB). After placing WAV files in the `data/` folder, upload them:
+Place WAV files in `data/`, then upload them with:
 
 ```sh
 ~/.platformio/penv/bin/pio run -t uploadfs
 ```
 
-**Required WAV files** (see `data/README.md` for format details):
-- `alert.wav` ~/.platformio/penv/bin/pio run -t uploadfs— Enemy missile spawned
-- `outgoing-missile.wav` — Player missile fired
-- `swoop-up.wav` — Player missile bursts
-- `incoming-missile.wav` — Enemy missile destroyed
-- `explode.wav` — Enemy reaches the ground line (city/battery/ground)
-- `roll-up.wav` — Wave cleared
-- `finale.wav` — Game over
+This only uploads the sound files. It does not rebuild the firmware.
 
-The filesystem upload is **independent** of firmware upload — you can swap audio files without recompiling code by running only `uploadfs`.
+See `data/README.md` for the exact WAV file names and format.
+
+## Sound File Names
+
+The game looks for these files in SPIFFS:
+
+- `launch.wav` for firing a missile
+- `player_burst.wav` for a player missile reaching a target
+- `intercept.wav` for destroying an enemy missile
+- `impact.wav` for an enemy missile hitting the ground, city, or bunker
+- `alert.wav` for an enemy missile appearing
+- `wave_complete.wav` when a wave ends
+- `game_over.wav` when all cities are gone
+
+## Teaching Notes
+
+This project works well for a class lab because students can change one part at a time.
+
+Good checkpoints for students:
+
+1. Get the display to show the game screen.
+2. Make the joystick move the cursor or launcher.
+3. Add sound after the graphics are working.
+4. Try changing values in `src/game_config.c` to see how the game feels.
+
+If you want the classroom build to stay simple, start with display plus controls first, then treat audio as an extension activity.
