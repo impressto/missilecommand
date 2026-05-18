@@ -32,6 +32,8 @@ The ESP32 version uses image files that have been converted into C headers insid
 
 These are RGB565 images. Black pixels are treated as transparent, so they do not get drawn.
 
+To convert your own images to the RGB565 C header format, use the [BMP Converter](https://impressto.ca/bmp_converter.php) tool.
+
 ## Wiring Guide
 
 If you are building this in class, wire the display first, then add controls, then add audio if your teacher wants the extension activity.
