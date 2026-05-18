@@ -114,7 +114,7 @@ MAX98357A SPK+ -----------------------> Speaker +
 MAX98357A SPK- -----------------------> Speaker -
 ```
 
-## Optionn
+## Options
 Current defaults disable controls (all `-1` in `build_flags`).
 
 If you wire controls, set these in `platformio.ini`:
