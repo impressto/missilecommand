@@ -1,5 +1,8 @@
 # Missile Command on ESP32-S3 + ST7789V
 
+<img width="1600" height="1139" alt="overview" src="https://github.com/user-attachments/assets/724ff416-901e-45b8-a31b-06c41ccd0f87" />
+
+
 This folder contains the ESP32 target for Missile Command.
 
 The default pin mapping matches the current values in `platformio.ini` and `src/hal_esp32.cpp`.
